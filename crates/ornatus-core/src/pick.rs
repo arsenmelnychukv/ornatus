@@ -468,9 +468,7 @@ mod tests {
         let mesh = &mut model.meshes[0];
         // Collapse every vertex to one point: all centroids are equal, so the
         // builder must stop splitting and make one big leaf.
-        for p in &mut mesh.positions {
-            *p = Vec3::ZERO;
-        }
+        mesh.positions.fill(Vec3::ZERO);
         let scene = PickScene::new(&model);
         let ray = Ray::new(Vec3::new(0.0, 5.0, 0.0), -Vec3::Y);
         let _ = scene.nearest(&model, &ray);
