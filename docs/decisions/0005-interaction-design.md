@@ -15,6 +15,7 @@ Research on existing tools (3D painting and decal tools, product customizers, 2D
 - **Shortcuts.** Delete removes, Ctrl+D duplicates, `[` and `]` change order, H flips on purpose. Each sticker has an opacity setting.
 - **Never mirrored by accident.** A sticker is only mirrored when the user flips it.
 - **Screenshot export.** Transparent PNG at 1x, 2x or 4x of the viewport size from the current camera angle. Nothing else in v0.1.
+- **Sizes on the surface.** A sticker's size and turn are measured in an undistorted frame on the surface (units of the UV width, with the vertical direction scaled by the surface's UV aspect), so images are not stretched by an uneven UV map.
 
 ## Consequences
 

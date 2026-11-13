@@ -4,6 +4,7 @@
 //! (decision 0002).
 
 mod paint;
+mod sticker;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -11,6 +12,7 @@ use ornatus_core::model::{MeshData, Model};
 use wgpu::util::DeviceExt as _;
 
 pub use paint::{PaintLayer, StrokeStyle};
+pub use sticker::{StickerDraw, StickerImages};
 
 /// Depth format the viewport expects from its render pass.
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -63,6 +65,7 @@ pub struct ModelRenderer {
     /// Bound for meshes that have no paint.
     empty_paint: wgpu::BindGroup,
     paint: Option<(usize, PaintLayer)>,
+    sticker_images: StickerImages,
     manual_srgb: bool,
     /// One entry per mesh in the model, `None` for meshes with no triangles.
     meshes: Vec<Option<GpuMesh>>,
@@ -212,6 +215,7 @@ impl ModelRenderer {
             material_layout,
             empty_paint,
             paint: None,
+            sticker_images: StickerImages::new(device),
             manual_srgb: !color_format.is_srgb(),
             meshes: Vec::new(),
             selected: None,
@@ -292,6 +296,32 @@ impl ModelRenderer {
     /// The paint layer and the mesh it belongs to, if a surface is chosen.
     pub fn paint(&self) -> Option<(usize, &PaintLayer)> {
         self.paint.as_ref().map(|(mesh, layer)| (*mesh, layer))
+    }
+
+    /// Upload an image that stickers can show. `rgba` is straight 8-bit RGBA.
+    pub fn add_sticker_image(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        id: u32,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> Result<(), String> {
+        self.sticker_images
+            .add(device, queue, id, width, height, rgba)
+    }
+
+    /// Redraw all stickers on the paint surface. Does nothing without one.
+    pub fn render_stickers(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        draws: &[StickerDraw],
+    ) {
+        if let Some((_, layer)) = &self.paint {
+            layer.render_stickers(device, queue, &self.sticker_images, draws);
+        }
     }
 
     /// Swap in a replacement layer for the current paint surface (for example

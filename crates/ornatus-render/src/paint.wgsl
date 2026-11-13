@@ -108,3 +108,47 @@ fn vs_blit(@builtin(vertex_index) index: u32) -> BlitOutput {
 fn fs_blit(input: BlitOutput) -> @location(0) vec4<f32> {
     return textureSample(source, source_sampler, input.uv);
 }
+
+// ---- stickers -------------------------------------------------------------
+
+struct StickerInstance {
+    @location(0) center: vec2<f32>,
+    @location(1) axis_u: vec2<f32>,
+    @location(2) axis_v: vec2<f32>,
+    @location(3) opacity: f32,
+    @location(4) flip: f32,
+}
+
+struct StickerOutput {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) tex: vec2<f32>,
+    @location(1) opacity: f32,
+}
+
+@group(0) @binding(0) var sticker_image: texture_2d<f32>;
+@group(0) @binding(1) var sticker_sampler: sampler;
+
+@vertex
+fn vs_sticker(@builtin(vertex_index) index: u32, sticker: StickerInstance) -> StickerOutput {
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0),
+    );
+    let corner = corners[index];
+    let uv = sticker.center + sticker.axis_u * corner.x + sticker.axis_v * corner.y;
+    var tex = corner * 0.5 + vec2<f32>(0.5);
+    if sticker.flip > 0.5 {
+        tex.x = 1.0 - tex.x;
+    }
+    var out: StickerOutput;
+    out.clip = vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0);
+    out.tex = tex;
+    out.opacity = sticker.opacity;
+    return out;
+}
+
+// The image is stored premultiplied, so scaling by opacity keeps it valid.
+@fragment
+fn fs_sticker(input: StickerOutput) -> @location(0) vec4<f32> {
+    return textureSample(sticker_image, sticker_sampler, input.tex) * input.opacity;
+}

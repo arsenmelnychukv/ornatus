@@ -6,9 +6,12 @@
 use std::fmt;
 
 pub mod camera;
+pub mod document;
+pub mod locate;
 pub mod model;
 pub mod paint;
 pub mod pick;
+pub mod sticker;
 pub mod surface;
 pub mod undo;
 pub mod uv;

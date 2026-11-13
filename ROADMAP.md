@@ -124,14 +124,17 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 - Not done by design for v0.1: choosing another surface discards the paint on the old one.
 - **Done when:** the user draws on the surface and undoes mistakes cleanly. Met in the browser build.
 
-### Phase 6: Stickers
+### Phase 6: Stickers (built, partly tested)
 
-- Import PNG/WebP/JPEG through a file picker and drag and drop.
-- Stickers as data objects, composited in order over the stroke layer.
-- Place mode with a ghost preview, Select mode with handles (aspect locked, Shift unlocks, 15 degree snap, typed fields).
-- Delete, duplicate, flip, reorder, per-sticker opacity.
-- Sticker finish (glossier roughness).
-- Undo and redo for every sticker operation.
+- [x] Import PNG, WebP and JPEG through the file picker (web) or drag and drop. Files are told apart by their first bytes, so a model and an image can be dropped the same way. Images over 2048 pixels are shrunk.
+- [x] Stickers are data (image, center, size, turn, opacity, flip) drawn in order over the stroke layer into a UV-space texture, with the model shader mixing them in. Size is measured on the surface, so a square image stays square even on a stretched UV map.
+- [x] Place mode with a ghost preview, normal-aligned by construction (UV space), and click to place. Select mode with a outline, four corner scale handles (aspect locked, Shift unlocks), a rotation handle (Shift snaps to 15 degrees), and drag to move.
+- [x] Panel fields for position, width, turn and opacity, plus Flip, Duplicate, Delete, Send back and Bring forward. Shortcuts: Delete, Ctrl+D, H, [ and ].
+- [x] One undo history for strokes and sticker edits (Ctrl+Z, Ctrl+Shift+Z).
+- [x] Sticker areas render glossier (roughness about 0.3).
+- Seen working in the browser: import, ghost, place, select, scale handle, undo.
+- Not yet looked at by eye: the rotation handle, flip, reorder, duplicate, delete and the panel fields. They have unit tests for their data logic only.
+- Known limits: the rotation handle and corners are only drawn where the sticker sits on the surface, so a sticker hanging over the edge hides them. Importing more than one image is supported, but there is no delete for an imported image.
 - **Done when:** the v0.1 acceptance criteria below pass, except export.
 
 ### Phase 7: Screenshot export

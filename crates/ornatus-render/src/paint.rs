@@ -15,7 +15,9 @@ use bytemuck::{Pod, Zeroable};
 use ornatus_core::paint::{Brush, Stroke};
 use wgpu::util::DeviceExt as _;
 
-const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+use crate::sticker::{Mipper, StickerDraw, StickerImages, StickerPass};
+
+pub(crate) const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const COVERAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 /// Dabs per draw call.
 const DAB_CAPACITY: usize = 16_384;
@@ -52,12 +54,12 @@ fn texture(
     texture_with_mips(device, size, format, label, 1)
 }
 
-fn mip_count(size: u32) -> u32 {
+pub(crate) fn mip_count(size: u32) -> u32 {
     size.max(1).ilog2() + 1
 }
 
 /// A view of one mip level, which is what a render pass can draw into.
-fn level_view(texture: &wgpu::Texture, level: u32) -> wgpu::TextureView {
+pub(crate) fn level_view(texture: &wgpu::Texture, level: u32) -> wgpu::TextureView {
     texture.create_view(&wgpu::TextureViewDescriptor {
         base_mip_level: level,
         mip_level_count: Some(1),
@@ -91,7 +93,7 @@ fn texture_with_mips(
     })
 }
 
-fn texture_entry(binding: u32, filterable: bool) -> wgpu::BindGroupLayoutEntry {
+pub(crate) fn texture_entry(binding: u32, filterable: bool) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -132,6 +134,7 @@ pub fn model_paint_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 count: None,
             },
             uniform_entry(3, wgpu::ShaderStages::FRAGMENT),
+            texture_entry(4, true),
         ],
     })
 }
@@ -143,6 +146,7 @@ pub fn empty_model_paint_group(
 ) -> wgpu::BindGroup {
     let color = texture(device, 1, COLOR_FORMAT, "ornatus empty paint");
     let coverage = texture(device, 1, COVERAGE_FORMAT, "ornatus empty coverage");
+    let stickers = texture(device, 1, COLOR_FORMAT, "ornatus empty stickers");
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
     let preview = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("ornatus empty preview"),
@@ -175,6 +179,12 @@ pub fn empty_model_paint_group(
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: preview.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(
+                    &stickers.create_view(&Default::default()),
+                ),
             },
         ],
     })
@@ -407,6 +417,10 @@ pub struct PaintLayer {
     committed: wgpu::Texture,
     base: wgpu::Texture,
     scratch: wgpu::Texture,
+    /// Every sticker drawn in order, in UV space.
+    stickers: wgpu::Texture,
+    sticker_pass: StickerPass,
+    mipper: Mipper,
     pipelines: Pipelines,
     dab_buffer: wgpu::Buffer,
     stroke_buffer: wgpu::Buffer,
@@ -430,6 +444,13 @@ impl PaintLayer {
         );
         let base = texture(device, size, COLOR_FORMAT, "ornatus paint base");
         let scratch = texture(device, size, COVERAGE_FORMAT, "ornatus paint scratch");
+        let stickers = texture_with_mips(
+            device,
+            size,
+            COLOR_FORMAT,
+            "ornatus paint stickers",
+            mip_count(size),
+        );
         let dab_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ornatus dabs"),
             size: (DAB_CAPACITY * std::mem::size_of::<DabInstance>()) as u64,
@@ -507,6 +528,12 @@ impl PaintLayer {
                     binding: 3,
                     resource: preview_buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(
+                        &stickers.create_view(&Default::default()),
+                    ),
+                },
             ],
         });
         Self {
@@ -514,6 +541,9 @@ impl PaintLayer {
             committed,
             base,
             scratch,
+            stickers,
+            sticker_pass: StickerPass::new(device),
+            mipper: Mipper::new(device),
             pipelines,
             dab_buffer,
             stroke_buffer,
@@ -711,45 +741,22 @@ impl PaintLayer {
     /// Fill the smaller mip levels of the committed paint, so the surface
     /// does not shimmer when it is far away.
     fn generate_mips(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        for level in 1..mip_count(self.size) {
-            let source = level_view(&self.committed, level - 1);
-            let target = level_view(&self.committed, level);
-            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("ornatus mip group"),
-                layout: &self.pipelines.blit_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&source),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                ],
-            });
-            self.submit(device, queue, |encoder| {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("ornatus mip"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &target,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                pass.set_pipeline(&self.pipelines.blit);
-                pass.set_bind_group(0, &group, &[]);
-                pass.draw(0..3, 0..1);
-            });
-        }
+        self.mipper
+            .generate(device, queue, &self.committed, self.size, self.size);
+    }
+
+    /// Redraw the stickers, first at the bottom, over a clear texture.
+    pub fn render_stickers(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        images: &StickerImages,
+        draws: &[StickerDraw],
+    ) {
+        self.sticker_pass
+            .render(device, queue, &self.stickers, images, draws);
+        self.mipper
+            .generate(device, queue, &self.stickers, self.size, self.size);
     }
 
     fn copy_base_to_committed(&self, device: &wgpu::Device, queue: &wgpu::Queue) {

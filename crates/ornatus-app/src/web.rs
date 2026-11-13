@@ -69,13 +69,17 @@ pub fn show_unsupported() {
 }
 
 /// Open the browser's file picker and queue the chosen `.glb` for loading.
-pub fn pick_file(inbox: Inbox, ctx: eframe::egui::Context) {
-    if let Err(error) = try_pick_file(inbox, ctx) {
+pub fn pick_file(inbox: Inbox, ctx: eframe::egui::Context, accept: &str) {
+    if let Err(error) = try_pick_file(inbox, ctx, accept) {
         log::error!("file picker failed: {error:?}");
     }
 }
 
-fn try_pick_file(inbox: Inbox, ctx: eframe::egui::Context) -> Result<(), wasm_bindgen::JsValue> {
+fn try_pick_file(
+    inbox: Inbox,
+    ctx: eframe::egui::Context,
+    accept: &str,
+) -> Result<(), wasm_bindgen::JsValue> {
     use wasm_bindgen::{JsCast as _, closure::Closure};
 
     let document = document().map_err(|e| wasm_bindgen::JsValue::from_str(&e))?;
@@ -83,7 +87,7 @@ fn try_pick_file(inbox: Inbox, ctx: eframe::egui::Context) -> Result<(), wasm_bi
         .create_element("input")?
         .dyn_into::<web_sys::HtmlInputElement>()?;
     input.set_type("file");
-    input.set_accept(".glb,model/gltf-binary");
+    input.set_accept(accept);
     let source = input.clone();
     let on_change = Closure::once_into_js(move || {
         let Some(file) = source.files().and_then(|files| files.get(0)) else {

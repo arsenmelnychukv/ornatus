@@ -13,8 +13,10 @@ use ornatus_render::ModelRenderer;
 use crate::theme;
 
 mod paint_tool;
+mod sticker_tool;
 use crate::viewport::ViewportCallback;
 use paint_tool::PaintTool;
+use sticker_tool::StickerTool;
 
 const DEFAULT_MODEL: &[u8] = include_bytes!("../assets/default-laptop.glb");
 /// The longest side of any loaded model is scaled to this many units.
@@ -47,6 +49,7 @@ pub struct OrnatusApp {
     audit: Option<UvAudit>,
     show_problems: bool,
     paint: PaintTool,
+    stickers: StickerTool,
     pending: Option<Pending>,
     pick_scene: PickScene,
     /// What the cursor is over in the viewport, if it is over it.
@@ -81,6 +84,7 @@ impl OrnatusApp {
             audit: None,
             show_problems: true,
             paint: PaintTool::default(),
+            stickers: StickerTool::default(),
             pending: None,
             pick_scene: PickScene::default(),
             hover: None,
@@ -115,6 +119,8 @@ impl OrnatusApp {
         self.audit = self.selected.map(|i| uv::audit(&self.model.meshes[i]));
         self.refresh_highlights();
         self.reset_paint_surface();
+        self.reset_stickers();
+        self.refresh_stickers();
     }
 
     fn refresh_highlights(&self) {
@@ -142,7 +148,7 @@ impl OrnatusApp {
             .file_name()
             .map_or_else(|| "file".to_owned(), |n| n.to_string_lossy().into_owned());
         match std::fs::read(path) {
-            Ok(bytes) => self.load_bytes(&name, &bytes),
+            Ok(bytes) => self.request_open(name, bytes),
             Err(error) => self.status = Some(format!("Could not read {name}: {error}")),
         }
     }
@@ -207,6 +213,19 @@ impl OrnatusApp {
 
     /// Open a model, asking first if that would throw paint away.
     fn request_open(&mut self, name: String, bytes: Vec<u8>) {
+        match sniff(&bytes) {
+            FileKind::Image => {
+                self.import_image(&name, &bytes);
+                return;
+            }
+            FileKind::Unknown => {
+                self.status = Some(format!(
+                    "{name} is not a .glb model or a PNG, WebP or JPEG image."
+                ));
+                return;
+            }
+            FileKind::Model => {}
+        }
         if self.paint.has_unsaved_paint() {
             self.pending = Some(Pending::Open(name, bytes));
         } else {
@@ -271,8 +290,8 @@ impl OrnatusApp {
         ui.separator();
         ui.label(format!("Model: {}", self.model_name));
         #[cfg(target_arch = "wasm32")]
-        if ui.button("Open .glb…").clicked() {
-            crate::web::pick_file(Arc::clone(&self.inbox), ui.ctx().clone());
+        if ui.button("Open model…").clicked() {
+            crate::web::pick_file(Arc::clone(&self.inbox), ui.ctx().clone(), ".glb");
         }
         #[cfg(not(target_arch = "wasm32"))]
         ui.label("Pass a .glb path as an argument.");
@@ -285,6 +304,8 @@ impl OrnatusApp {
         self.audit_report(ui);
         ui.separator();
         self.brush_panel(ui);
+        ui.separator();
+        self.sticker_panel(ui);
     }
 
     fn surface_list(&mut self, ui: &mut egui::Ui) {
@@ -466,6 +487,7 @@ impl OrnatusApp {
         let camera = self.controller.camera;
         let aspect = rect.width() / rect.height().max(1.0);
         let drawing = self.paint_input(&response, rect, aspect, navigating);
+        self.sticker_input(&response, rect, aspect, navigating);
         self.hover = None;
         if let (Some(pointer), Some(target)) = (response.hover_pos(), self.selected)
             && !navigating
@@ -500,7 +522,28 @@ impl OrnatusApp {
                 eye: camera.eye(),
             },
         ));
+        self.draw_sticker_handles(&ui.painter_at(rect), rect, aspect);
         self.draw_cursor_overlay(&ui.painter_at(rect), rect);
+    }
+}
+
+enum FileKind {
+    Model,
+    Image,
+    Unknown,
+}
+
+/// Tell models and images apart by their first bytes, not their names.
+fn sniff(bytes: &[u8]) -> FileKind {
+    if bytes.starts_with(b"glTF") {
+        FileKind::Model
+    } else if bytes.starts_with(&[0x89, b'P', b'N', b'G'])
+        || bytes.starts_with(&[0xFF, 0xD8, 0xFF])
+        || (bytes.len() > 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP")
+    {
+        FileKind::Image
+    } else {
+        FileKind::Unknown
     }
 }
 
@@ -522,6 +565,7 @@ impl eframe::App for OrnatusApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_dropped_files(ui.ctx());
         self.paint_shortcuts(ui.ctx());
+        self.sticker_shortcuts(ui.ctx());
         egui::Panel::left("tools")
             .resizable(false)
             .exact_size(220.0)

@@ -1,9 +1,9 @@
 //! Freehand painting: the brush panel, stroke input, undo and redo (Phase 5).
 
 use eframe::egui;
-use ornatus_core::paint::{Brush, HitSample, Stroke, StrokeBuilder};
+use ornatus_core::document::{Document, Edit};
+use ornatus_core::paint::{Brush, HitSample, StrokeBuilder};
 use ornatus_core::pick::Pick;
-use ornatus_core::undo::UndoStack;
 use ornatus_render::StrokeStyle;
 
 use super::OrnatusApp;
@@ -22,9 +22,8 @@ pub(super) struct PaintTool {
     pub(super) hardness: f32,
     pub(super) erase: bool,
     pub(super) texture_size: u32,
-    history: UndoStack<Stroke>,
-    /// True once a stroke was too old to undo and got baked in.
-    baked: bool,
+    /// Strokes and sticker edits, with undo and redo.
+    pub(super) document: Document,
     current: Option<StrokeBuilder>,
     last_pointer: Option<egui::Pos2>,
     /// Whether the page currently asks before it is closed.
@@ -41,8 +40,7 @@ impl Default for PaintTool {
             hardness: brush.hardness,
             erase: false,
             texture_size: SIZES[0].0,
-            history: UndoStack::default(),
-            baked: false,
+            document: Document::default(),
             current: None,
             last_pointer: None,
             warning_on: false,
@@ -63,13 +61,12 @@ impl PaintTool {
 
     /// True when there is paint the user would lose by leaving.
     pub(super) fn has_unsaved_paint(&self) -> bool {
-        self.baked || self.history.can_undo()
+        self.document.has_content()
     }
 
     /// Forget all strokes (a new surface or model).
     pub(super) fn reset(&mut self) {
-        self.history.clear();
-        self.baked = false;
+        self.document.clear();
         self.current = None;
         self.last_pointer = None;
     }
@@ -97,7 +94,7 @@ impl OrnatusApp {
                 .is_some_and(|audit| audit.is_paintable())
     }
 
-    fn update_leave_warning(&mut self) {
+    pub(super) fn update_leave_warning(&mut self) {
         let wanted = self.paint.has_unsaved_paint();
         if wanted != self.paint.warning_on {
             self.paint.warning_on = wanted;
@@ -107,7 +104,7 @@ impl OrnatusApp {
     }
 
     /// The hit under a screen position, if it is on the paint surface.
-    fn paint_sample(
+    pub(super) fn paint_sample(
         &self,
         pointer: egui::Pos2,
         rect: egui::Rect,
@@ -207,11 +204,8 @@ impl OrnatusApp {
         let evicted = if stroke.dabs.is_empty() {
             None
         } else {
-            self.paint.history.push(stroke)
+            self.paint.document.push(Edit::Stroke(stroke))
         };
-        if evicted.is_some() {
-            self.paint.baked = true;
-        }
         self.with_renderer(|renderer, device, queue| {
             if let Some((_, layer)) = renderer.paint() {
                 layer.end_stroke(device, queue, &style);
@@ -224,24 +218,25 @@ impl OrnatusApp {
     }
 
     pub(super) fn undo_paint(&mut self) {
-        if self.paint.history.undo() {
+        if self.paint.document.undo() {
             self.replay_paint();
         }
     }
 
     pub(super) fn redo_paint(&mut self) {
-        if self.paint.history.redo() {
+        if self.paint.document.redo() {
             self.replay_paint();
         }
     }
 
     fn replay_paint(&mut self) {
-        let strokes = self.paint.history.done().to_vec();
+        let strokes = self.paint.document.strokes();
         self.with_renderer(|renderer, device, queue| {
             if let Some((_, layer)) = renderer.paint() {
                 layer.replay(device, queue, &strokes);
             }
         });
+        self.stickers_changed();
         self.update_leave_warning();
     }
 
@@ -250,7 +245,7 @@ impl OrnatusApp {
             return;
         }
         self.paint.texture_size = size;
-        let strokes = self.paint.history.done().to_vec();
+        let strokes = self.paint.document.strokes();
         self.with_renderer(|renderer, device, queue| {
             let resized = renderer
                 .paint()
@@ -259,6 +254,7 @@ impl OrnatusApp {
                 renderer.replace_paint(layer);
             }
         });
+        self.refresh_stickers();
     }
 
     /// Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y.
@@ -314,13 +310,13 @@ impl OrnatusApp {
         }
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(self.paint.history.can_undo(), egui::Button::new("Undo"))
+                .add_enabled(self.paint.document.can_undo(), egui::Button::new("Undo"))
                 .clicked()
             {
                 self.undo_paint();
             }
             if ui
-                .add_enabled(self.paint.history.can_redo(), egui::Button::new("Redo"))
+                .add_enabled(self.paint.document.can_redo(), egui::Button::new("Redo"))
                 .clicked()
             {
                 self.redo_paint();

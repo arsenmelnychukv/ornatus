@@ -30,6 +30,8 @@ struct StrokePreview {
 @group(2) @binding(1) var stroke_coverage: texture_2d<f32>;
 @group(2) @binding(2) var paint_sampler: sampler;
 @group(2) @binding(3) var<uniform> preview: StrokePreview;
+// Stickers drawn in order, premultiplied sRGB, over the strokes.
+@group(2) @binding(4) var stickers_texture: texture_2d<f32>;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -112,13 +114,16 @@ fn fs_main(input: VertexOutput, @builtin(front_facing) front: bool) -> @location
     let v = normalize(camera.eye.xyz - input.world);
     let n_dot_v = max(dot(n, v), 1e-3);
     // Texture reads must happen in uniform control flow, before any branches.
-    let paint = paint_at(input.uv);
+    let stickers = textureSample(stickers_texture, paint_sampler, input.uv);
+    // Stickers sit on top of the strokes.
+    let paint = stickers + paint_at(input.uv) * (1.0 - stickers.a);
     var albedo = material.base_color.rgb;
     if paint.a > 1e-4 {
         albedo = mix(albedo, srgb_to_linear(paint.rgb / paint.a), paint.a);
     }
     let metallic = clamp(material.params.x, 0.0, 1.0);
-    let roughness = clamp(material.params.y, 0.04, 1.0);
+    // Vinyl is glossier than the chassis, so stickers stand out (decision 0003).
+    let roughness = clamp(mix(material.params.y, 0.3, stickers.a), 0.04, 1.0);
 
     let f0 = mix(vec3<f32>(0.04), albedo, metallic);
     let diffuse_color = albedo * (1.0 - metallic);
