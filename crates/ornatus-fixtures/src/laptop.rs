@@ -245,3 +245,75 @@ pub fn grid_glb(side: u32) -> Vec<u8> {
     }
     .to_glb()
 }
+
+/// Four flat quads side by side, each with a different UV problem, for
+/// testing the UV audit by eye: clean, mirrored, overlapping, and no UVs.
+pub fn flawed_glb() -> Vec<u8> {
+    let corners = [
+        [-0.4, 0.0, -0.4],
+        [-0.4, 0.0, 0.4],
+        [0.4, 0.0, 0.4],
+        [0.4, 0.0, -0.4],
+    ];
+    let good = [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]];
+    let quad = |name: &str, x: f32, uvs: Option<Vec<[f32; 2]>>| {
+        let positions: Vec<[f32; 3]> = corners.iter().map(|p| [p[0] + x, p[1], p[2]]).collect();
+        MeshSpec {
+            name: name.to_owned(),
+            material: 0,
+            normals: vec![[0.0, 1.0, 0.0]; positions.len()],
+            positions,
+            uvs,
+            indices: vec![0, 1, 2, 0, 2, 3],
+        }
+    };
+    // Two separate triangles that both map onto the same UV triangle.
+    let overlapping = {
+        let mut mesh = quad("Overlapping_Quad", 1.0, None);
+        let [a, b, c, d] = [corners[0], corners[1], corners[2], corners[3]];
+        mesh.positions = [a, b, c, a, c, d]
+            .iter()
+            .map(|p| [p[0] + 1.0, p[1], p[2]])
+            .collect();
+        mesh.normals = vec![[0.0, 1.0, 0.0]; 6];
+        mesh.uvs = Some(vec![
+            [0.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [0.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+        ]);
+        mesh.indices = vec![0, 1, 2, 3, 4, 5];
+        mesh
+    };
+    let meshes = vec![
+        quad("Clean_Quad", -1.0, Some(good.to_vec())),
+        quad(
+            "Mirrored_Quad",
+            0.0,
+            Some(vec![[1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]),
+        ),
+        overlapping,
+        quad("NoUV_Quad", 2.0, None),
+    ];
+    let nodes = (0..meshes.len())
+        .map(|i| NodeSpec {
+            name: meshes[i].name.clone(),
+            mesh: Some(i),
+            translation: [0.0; 3],
+            rotation: IDENTITY,
+            children: vec![],
+        })
+        .collect();
+    SceneSpec {
+        materials: vec![
+            material("Plain", [0.7, 0.7, 0.75, 1.0], 0.2, 0.5),
+            material("Plain2", [0.7, 0.7, 0.75, 1.0], 0.2, 0.5),
+        ],
+        roots: (0..meshes.len()).collect(),
+        meshes,
+        nodes,
+    }
+    .to_glb()
+}

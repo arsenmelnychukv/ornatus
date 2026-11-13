@@ -13,7 +13,7 @@ fn main() -> ExitCode {
     match std::env::args().nth(1).as_deref() {
         None | Some("help") => {
             println!(
-                "tasks:\n  model          regenerate {MODEL_PATH}\n  stress [MB]    build a large .glb (default 100 MB) into target/stress.glb and load it\n  stress load    load target/stress.glb in a fresh process, report time and peak memory"
+                "tasks:\n  model          regenerate {MODEL_PATH}\n  flawed         write target/flawed.glb, quads with different UV problems, to try the UV audit\n  stress [MB]    build a large .glb (default 100 MB) into target/stress.glb and load it\n  stress load    load target/stress.glb in a fresh process, report time and peak memory"
             );
             ExitCode::SUCCESS
         }
@@ -31,6 +31,19 @@ fn main() -> ExitCode {
                 }
                 Err(error) => {
                     eprintln!("could not write {MODEL_PATH}: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("flawed") => {
+            let path = workspace_root().join("target/flawed.glb");
+            match std::fs::write(&path, ornatus_fixtures::flawed_glb()) {
+                Ok(()) => {
+                    println!("wrote target/flawed.glb");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("could not write target/flawed.glb: {error}");
                     ExitCode::FAILURE
                 }
             }
@@ -95,6 +108,14 @@ fn stress(arg: Option<String>) -> ExitCode {
         loaded.warnings
     );
     drop(bytes);
+    let started = std::time::Instant::now();
+    let audit = ornatus_core::uv::audit(&loaded.model.meshes[0]);
+    println!(
+        "uv audit: {:.2?}, {} findings, coverage {:.0}%",
+        started.elapsed(),
+        audit.findings.len(),
+        audit.coverage * 100.0
+    );
     let mut model = loaded.model;
     let started = std::time::Instant::now();
     let scale = model.center_and_fit(2.0);

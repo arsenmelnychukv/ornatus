@@ -5,6 +5,8 @@ use eframe::egui_wgpu::{self, RenderState};
 use ornatus_core::Mode;
 use ornatus_core::camera::{CameraController, OrbitCamera};
 use ornatus_core::model::{self, LoadWarning, Model};
+use ornatus_core::surface::suggest_surface;
+use ornatus_core::uv::{self, UvAudit};
 use ornatus_render::ModelRenderer;
 
 use crate::theme;
@@ -30,6 +32,10 @@ pub struct OrnatusApp {
     model_name: String,
     controller: CameraController,
     status: Option<String>,
+    /// The surface chosen as the paint target, as an index into `model.meshes`.
+    selected: Option<usize>,
+    audit: Option<UvAudit>,
+    show_problems: bool,
     /// Dropped files that finished reading, waiting to be loaded.
     inbox: Inbox,
 }
@@ -55,10 +61,57 @@ impl OrnatusApp {
             model_name: String::new(),
             controller: CameraController::new(OrbitCamera::default()),
             status: None,
+            selected: None,
+            audit: None,
+            show_problems: true,
             inbox: Arc::default(),
         };
         app.load_bytes("Default laptop", DEFAULT_MODEL);
         app
+    }
+
+    fn with_renderer(
+        &self,
+        f: impl FnOnce(&mut ModelRenderer, &eframe::wgpu::Device, &eframe::wgpu::Queue),
+    ) {
+        if let Some(renderer) = self
+            .render_state
+            .renderer
+            .write()
+            .callback_resources
+            .get_mut::<ModelRenderer>()
+        {
+            f(
+                renderer,
+                &self.render_state.device,
+                &self.render_state.queue,
+            );
+        }
+    }
+
+    /// Choose the paint surface (or none), audit its UVs and update the viewport.
+    fn select_surface(&mut self, index: Option<usize>) {
+        self.selected = index.filter(|&i| i < self.model.meshes.len());
+        self.audit = self.selected.map(|i| uv::audit(&self.model.meshes[i]));
+        self.refresh_highlights();
+    }
+
+    fn refresh_highlights(&self) {
+        let selected = self.selected;
+        let flagged = self
+            .audit
+            .as_ref()
+            .filter(|_| self.show_problems)
+            .map(|audit| audit.flagged_triangles.as_slice());
+        self.with_renderer(|renderer, device, queue| {
+            renderer.set_selected(queue, selected);
+            match (selected, flagged) {
+                (Some(i), Some(triangles)) => {
+                    renderer.set_overlay(device, i, &self.model.meshes[i], triangles);
+                }
+                _ => renderer.clear_overlay(),
+            }
+        });
     }
 
     /// Open a `.glb` from disk (desktop dev harness only).
@@ -78,18 +131,11 @@ impl OrnatusApp {
             Ok(loaded) => {
                 let mut model = loaded.model;
                 model.center_and_fit(MODEL_SIZE);
-                if let Some(renderer) = self
-                    .render_state
-                    .renderer
-                    .write()
-                    .callback_resources
-                    .get_mut::<ModelRenderer>()
-                {
-                    renderer.set_model(&self.render_state.device, &model);
-                }
+                self.with_renderer(|renderer, device, _| renderer.set_model(device, &model));
                 self.model = model;
                 self.model_name = name.to_owned();
                 self.controller = CameraController::new(OrbitCamera::default());
+                self.select_surface(suggest_surface(&self.model));
                 self.status = (!loaded.warnings.is_empty()).then(|| {
                     loaded
                         .warnings
@@ -156,10 +202,79 @@ impl OrnatusApp {
             ui.colored_label(egui::Color32::from_rgb(240, 190, 90), status);
         }
         ui.separator();
-        ui.label(format!("Surfaces ({})", self.model.meshes.len()));
-        for mesh in &self.model.meshes {
-            let material = mesh.material.as_deref().unwrap_or("no material");
-            ui.label(format!("{} ({material})", mesh.name));
+        self.surface_list(ui);
+        self.audit_report(ui);
+    }
+
+    fn surface_list(&mut self, ui: &mut egui::Ui) {
+        ui.label(format!(
+            "Paint surface ({} to choose from)",
+            self.model.meshes.len()
+        ));
+        let mut clicked = None;
+        let row_height =
+            ui.text_style_height(&egui::TextStyle::Button) + ui.spacing().item_spacing.y;
+        egui::ScrollArea::vertical()
+            .id_salt("surfaces")
+            .max_height(220.0)
+            .auto_shrink([false, true])
+            .show_rows(ui, row_height, self.model.meshes.len(), |ui, rows| {
+                for i in rows {
+                    let mesh = &self.model.meshes[i];
+                    let material = mesh.material.as_deref().unwrap_or("no material");
+                    let label = format!("{} ({material})", mesh.name);
+                    if ui
+                        .selectable_label(self.selected == Some(i), label)
+                        .clicked()
+                    {
+                        clicked = Some(i);
+                    }
+                }
+            });
+        if clicked.is_some() {
+            self.select_surface(clicked);
+        }
+    }
+
+    fn audit_report(&mut self, ui: &mut egui::Ui) {
+        let Some(audit) = &self.audit else {
+            ui.label("Pick the surface to paint on.");
+            return;
+        };
+        ui.separator();
+        if audit.is_paintable() && audit.findings.is_empty() {
+            ui.colored_label(egui::Color32::from_rgb(120, 220, 150), "Ready to paint");
+        } else if audit.is_paintable() {
+            ui.colored_label(
+                egui::Color32::from_rgb(240, 190, 90),
+                "Can paint here, but check the warnings",
+            );
+        } else {
+            ui.colored_label(
+                egui::Color32::from_rgb(255, 110, 110),
+                "Cannot paint on this surface",
+            );
+        }
+        for finding in &audit.findings {
+            let color = if finding.is_blocking() {
+                egui::Color32::from_rgb(255, 110, 110)
+            } else {
+                egui::Color32::from_rgb(240, 190, 90)
+            };
+            ui.colored_label(color, finding.to_string());
+        }
+        if audit.is_paintable() {
+            ui.label(format!("UV coverage: {:.0}%", audit.coverage * 100.0));
+        }
+        if !audit.flagged_triangles.is_empty() {
+            let mut show = self.show_problems;
+            if ui
+                .checkbox(&mut show, "Show problem areas in red")
+                .changed()
+            {
+                self.show_problems = show;
+                self.refresh_highlights();
+            }
         }
     }
 
@@ -231,7 +346,9 @@ impl eframe::App for OrnatusApp {
         egui::Panel::left("tools")
             .resizable(false)
             .exact_size(220.0)
-            .show(ui, |ui| self.tool_panel(ui));
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| self.tool_panel(ui));
+            });
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ui, |ui| self.viewport(ui));

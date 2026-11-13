@@ -94,12 +94,13 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 - [x] Memory check with a 100 MB model: it loads in about 0.2 s natively with a 323 MB peak, and loads and renders in the browser (1.9 million vertices) without errors.
 - **Done when:** the default model and any reasonable user `.glb` load centered and well lit. Met.
 
-### Phase 3: Surface selection and UV audit
+### Phase 3: Surface selection and UV audit (done)
 
-- Mesh and material list with a highlight on the selected surface.
-- Missing UVs block painting with a clear error.
-- Overlapping or mirrored UV islands show a warning with the affected area highlighted.
-- **Done when:** the app knows which surface is paintable and tells the user what is wrong with it.
+- [x] Surface list with a highlight on the selected surface, and a suggested default (the outer lid, by name hints).
+- [x] Missing UVs block painting with a clear message.
+- [x] Mirrored, overlapping, out-of-range and degenerate UVs, and low UV coverage, show warnings. Affected triangles are drawn in red on the model, with a toggle.
+- [x] `cargo xtask flawed` writes a test model with one quad per problem.
+- **Done when:** the app knows which surface is paintable and tells the user what is wrong with it. Met. The audit takes about 0.5 s on a 3.7 million triangle surface natively.
 
 ### Phase 4: Picking
 

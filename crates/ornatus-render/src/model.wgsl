@@ -11,7 +11,7 @@ struct Camera {
 
 struct Material {
     base_color: vec4<f32>,
-    // x: metallic, y: roughness.
+    // x: metallic, y: roughness, z: selection highlight, 0 to 1.
     params: vec4<f32>,
 }
 
@@ -92,8 +92,16 @@ fn fs_main(input: VertexOutput, @builtin(front_facing) front: bool) -> @location
     let color = diffuse_color * irradiance + prefiltered * env_brdf(f0, roughness, n_dot_v);
 
     var out_color = tonemap(color);
+    // Selected surface: tint towards the accent color.
+    out_color = mix(out_color, vec3<f32>(0.47, 0.55, 1.0), 0.32 * material.params.z);
     if camera.eye.w > 0.5 {
         out_color = pow(out_color, vec3<f32>(1.0 / 2.2));
     }
     return vec4<f32>(out_color, material.base_color.a);
+}
+
+// Problem areas found by the UV audit, drawn on top of the surface.
+@fragment
+fn fs_flag() -> @location(0) vec4<f32> {
+    return vec4<f32>(1.0, 0.18, 0.22, 0.6);
 }

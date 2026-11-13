@@ -37,21 +37,89 @@ struct GpuMesh {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     index_count: u32,
+    material_buffer: wgpu::Buffer,
+    material_values: MaterialUniform,
     material: wgpu::BindGroup,
+}
+
+/// Triangles flagged by the UV audit, drawn over one mesh.
+struct Overlay {
+    mesh: usize,
+    indices: wgpu::Buffer,
+    index_count: u32,
 }
 
 /// Draws a [`Model`] into an existing render pass.
 pub struct ModelRenderer {
     pipeline: wgpu::RenderPipeline,
+    overlay_pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     material_layout: wgpu::BindGroupLayout,
     manual_srgb: bool,
-    meshes: Vec<GpuMesh>,
+    /// One entry per mesh in the model, `None` for meshes with no triangles.
+    meshes: Vec<Option<GpuMesh>>,
+    selected: Option<usize>,
+    overlay: Option<Overlay>,
+}
+
+struct PipelineSettings<'a> {
+    fragment_entry: &'a str,
+    depth_write: bool,
+    depth_compare: wgpu::CompareFunction,
+    bias: wgpu::DepthBiasState,
+}
+
+fn build_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    color_format: wgpu::TextureFormat,
+    settings: &PipelineSettings<'_>,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("ornatus model pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<Vertex>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2],
+            })],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some(settings.fragment_entry),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(settings.depth_write),
+            depth_compare: Some(settings.depth_compare),
+            stencil: wgpu::StencilState::default(),
+            bias: settings.bias,
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 impl ModelRenderer {
-    /// Build the pipeline for a render pass with these attachment formats.
+    /// Build the pipelines for a render pass with this color format.
     pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ornatus model shader"),
@@ -80,45 +148,35 @@ impl ModelRenderer {
             bind_group_layouts: &[Some(&camera_layout), Some(&material_layout)],
             immediate_size: 0,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("ornatus model pipeline"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<Vertex>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2],
-                })],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
-                stencil: wgpu::StencilState::default(),
+        let pipeline = build_pipeline(
+            device,
+            &layout,
+            &shader,
+            color_format,
+            &PipelineSettings {
+                fragment_entry: "fs_main",
+                depth_write: true,
+                depth_compare: wgpu::CompareFunction::Less,
                 bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+            },
+        );
+        // Pulled slightly towards the camera so it sits on top of its own surface.
+        let overlay_pipeline = build_pipeline(
+            device,
+            &layout,
+            &shader,
+            color_format,
+            &PipelineSettings {
+                fragment_entry: "fs_flag",
+                depth_write: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                bias: wgpu::DepthBiasState {
+                    constant: -4,
+                    slope_scale: -2.0,
+                    clamp: 0.0,
+                },
+            },
+        );
         let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ornatus camera"),
             size: std::mem::size_of::<CameraUniform>() as u64,
@@ -135,22 +193,28 @@ impl ModelRenderer {
         });
         Self {
             pipeline,
+            overlay_pipeline,
             camera_buffer,
             camera_bind_group,
             material_layout,
             manual_srgb: !color_format.is_srgb(),
             meshes: Vec::new(),
+            selected: None,
+            overlay: None,
         }
     }
 
-    /// Replace the model that gets drawn.
+    /// Replace the model that gets drawn. Mesh numbers used by
+    /// [`set_selected`](Self::set_selected) and [`set_overlay`](Self::set_overlay)
+    /// follow the order of `model.meshes`.
     pub fn set_model(&mut self, device: &wgpu::Device, model: &Model) {
         self.meshes = model
             .meshes
             .iter()
-            .filter(|mesh| !mesh.indices.is_empty())
-            .map(|mesh| self.upload(device, mesh))
+            .map(|mesh| (!mesh.indices.is_empty()).then(|| self.upload(device, mesh)))
             .collect();
+        self.selected = None;
+        self.overlay = None;
     }
 
     fn upload(&self, device: &wgpu::Device, mesh: &MeshData) -> GpuMesh {
@@ -169,14 +233,14 @@ impl ModelRenderer {
                     .unwrap_or([0.0, 0.0]),
             })
             .collect();
-        let material = MaterialUniform {
+        let material_values = MaterialUniform {
             base_color: mesh.base_color,
             params: [mesh.metallic, mesh.roughness, 0.0, 0.0],
         };
         let material_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ornatus material"),
-            contents: bytemuck::bytes_of(&material),
-            usage: wgpu::BufferUsages::UNIFORM,
+            contents: bytemuck::bytes_of(&material_values),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         GpuMesh {
             vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -198,7 +262,52 @@ impl ModelRenderer {
                     resource: material_buffer.as_entire_binding(),
                 }],
             }),
+            material_buffer,
+            material_values,
         }
+    }
+
+    /// Tint one mesh as the selected surface, or clear the tint with `None`.
+    pub fn set_selected(&mut self, queue: &wgpu::Queue, mesh: Option<usize>) {
+        for (index, strength) in [(self.selected, 0.0), (mesh, 1.0)] {
+            if let Some(Some(gpu)) = index.and_then(|i| self.meshes.get(i)) {
+                let mut values = gpu.material_values;
+                values.params[2] = strength;
+                queue.write_buffer(&gpu.material_buffer, 0, bytemuck::bytes_of(&values));
+            }
+        }
+        self.selected = mesh;
+    }
+
+    /// Draw the given triangles of a mesh in red on top of it. `triangles`
+    /// are triangle numbers (index list position divided by three).
+    pub fn set_overlay(
+        &mut self,
+        device: &wgpu::Device,
+        mesh_index: usize,
+        mesh: &MeshData,
+        triangles: &[u32],
+    ) {
+        let indices: Vec<u32> = triangles
+            .iter()
+            .filter_map(|&t| mesh.indices.get(t as usize * 3..t as usize * 3 + 3))
+            .flatten()
+            .copied()
+            .collect();
+        self.overlay = (!indices.is_empty()).then(|| Overlay {
+            mesh: mesh_index,
+            index_count: u32::try_from(indices.len()).unwrap_or(u32::MAX),
+            indices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("ornatus overlay"),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            }),
+        });
+    }
+
+    /// Remove the problem-area overlay.
+    pub fn clear_overlay(&mut self) {
+        self.overlay = None;
     }
 
     /// Upload the camera for the next draw.
@@ -219,11 +328,20 @@ impl ModelRenderer {
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.camera_bind_group, &[]);
-        for mesh in &self.meshes {
+        for mesh in self.meshes.iter().flatten() {
             pass.set_bind_group(1, &mesh.material, &[]);
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+        }
+        if let Some(overlay) = &self.overlay
+            && let Some(Some(mesh)) = self.meshes.get(overlay.mesh)
+        {
+            pass.set_pipeline(&self.overlay_pipeline);
+            pass.set_bind_group(1, &mesh.material, &[]);
+            pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+            pass.set_index_buffer(overlay.indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..overlay.index_count, 0, 0..1);
         }
     }
 }
