@@ -44,9 +44,9 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 | Concern | Choice | Why |
 |---|---|---|
 | Language | Rust (stable) | Project requirement |
-| Window / input | `winit` | Works on the web and desktop |
+| Window / input | `eframe` (wraps `winit`) | Works on the web and desktop |
 | GPU | `wgpu` | WebGPU first, WebGL2 fallback, desktop backends for development |
-| UI | `egui` + `egui-wgpu` | All Rust, fast to iterate, small theme written in Rust |
+| UI | `egui` via `eframe` | All Rust, fast to iterate, small theme written in Rust |
 | Math | `glam` | Small, fast, wgpu-friendly |
 | glTF loading | `gltf` crate | Meshes, materials, node hierarchy |
 | Images | `image` crate | PNG/WebP/JPEG decode and encode |
@@ -58,7 +58,7 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 
 - `ornatus-core`: scene data, paint and sticker data, picking, undo, UV audit. No GPU, no window, no browser APIs. Fully unit-testable.
 - `ornatus-render`: `wgpu` rendering. Render passes only, no compute shaders.
-- `ornatus-app`: `winit`, `egui`, wasm entry point.
+- `ornatus-app`: `eframe`, `egui`, wasm entry point.
 - `xtask`: generates the default laptop model and test fixtures.
 
 ## Phases
@@ -70,7 +70,7 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 - [x] Scope reduced on 2026-11-13: lightweight, Rust only. No landing page, no HTML or CSS design work, no Impeccable design step.
 - **Done when:** decisions are recorded and the roadmap matches them.
 
-### Phase 1: Foundation
+### Phase 1: Foundation (in progress)
 
 - Install the Rust toolchain via `rustup`.
 - Cargo workspace with the three crates and `xtask`. `trunk` setup.
@@ -79,7 +79,7 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 - GitHub Pages deploy on merge to `main`.
 - Window, clear color, `egui` panel running natively and in the browser.
 - Small dark `egui` theme written in Rust.
-- "Your browser cannot run this" message shown from Rust when neither WebGPU nor WebGL2 is available. The only HTML is the `trunk`-generated loader page.
+- "Your browser cannot run this" message shown from Rust when neither WebGPU nor WebGL2 is available. The only HTML is a ten-line `index.html` that `trunk` needs as its entry point.
 - **Done when:** the live Pages site opens the themed app shell in the latest Chrome, Firefox and Safari.
 
 ### Phase 2: Model viewer

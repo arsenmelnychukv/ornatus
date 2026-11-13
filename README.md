@@ -13,3 +13,13 @@ Dual-licensed under MIT or Apache-2.0, at your option. You may read, fork and mo
 ## Contributions
 
 This is a solo project. Pull requests, issues and patches from others are not accepted.
+
+## Development
+
+Requires Rust (see `rust-toolchain.toml`) and [`trunk`](https://trunkrs.dev).
+
+```bash
+cargo run            # native dev window
+trunk serve          # web build at http://127.0.0.1:8080
+cargo xtask help     # dev tasks
+```

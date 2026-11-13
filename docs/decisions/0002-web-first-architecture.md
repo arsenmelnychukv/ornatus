@@ -14,9 +14,9 @@ A small, nuanced tool is better when nobody has to download it. Rust with `wgpu`
 - **Fully client-side.** No backend, no accounts, no uploads. Models and stickers are read in the browser and stay on the user's machine.
 - **Hosting.** GitHub Pages, deployed from GitHub Actions on every merge to `main`. The same workflow runs format, lint and tests on every push.
 - **Supported browsers.** The latest two stable versions of Chrome, Edge, Firefox and Safari on desktop. If wasm loads but neither WebGPU nor WebGL2 is available, the Rust code shows a clear "cannot run this" message (written from Rust through `web-sys`). A browser too old to load wasm at all shows a blank page; that is accepted.
-- **No authored HTML, CSS or JavaScript.** Confirmed 2026-11-13. The only HTML is the minimal loader page that `trunk` generates, which hosts the canvas and starts the wasm. Nothing in it is hand-designed.
+- **No authored HTML, CSS or JavaScript.** Confirmed 2026-11-13. The only HTML is `index.html`, a ten-line file with an empty body that `trunk` needs as its entry point. The canvas, page background and error message are all created from Rust.
 - **Input.** Desktop first (mouse, trackpad, pen). Input goes through a pointer-event abstraction so touch support is a small addition later.
-- **UI toolkit.** `egui`. The core stays UI-agnostic so a different UI could replace it.
+- **UI toolkit.** `egui`, run through `eframe` (which wraps `winit` and `egui-wgpu`) instead of wiring those by hand. Updated 2026-11-13 in Phase 1: it is far less code, and custom `wgpu` drawing is still possible through egui's paint callbacks. The core stays UI-agnostic so a different UI could replace it.
 
 ## Consequences
 

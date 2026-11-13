@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = ["crates/ornatus-core", "crates/ornatus-render", "crates/ornatus-app", "xtask"]
+default-members = ["crates/ornatus-app"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

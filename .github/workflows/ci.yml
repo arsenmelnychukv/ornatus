@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy (native)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Clippy (wasm)
+        run: cargo clippy -p ornatus-app --target wasm32-unknown-unknown -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - name: Build web app
+        run: trunk build --release

@@ -1,0 +1,10 @@
+[package]
+name = "ornatus-core"
+description = "Scene, paint, sticker, picking and undo logic for ornatus. No GPU, window or browser code."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
