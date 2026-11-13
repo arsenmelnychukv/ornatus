@@ -28,6 +28,12 @@ type DroppedBytes = (String, Result<Vec<u8>, String>);
 /// Files that finished reading, shared with async readers on the web.
 pub(crate) type Inbox = Arc<Mutex<Vec<DroppedBytes>>>;
 
+/// Something that would throw the current paint away, waiting for a yes.
+enum Pending {
+    Select(Option<usize>),
+    Open(String, Vec<u8>),
+}
+
 /// Top-level application state.
 pub struct OrnatusApp {
     mode: Mode,
@@ -41,6 +47,7 @@ pub struct OrnatusApp {
     audit: Option<UvAudit>,
     show_problems: bool,
     paint: PaintTool,
+    pending: Option<Pending>,
     pick_scene: PickScene,
     /// What the cursor is over in the viewport, if it is over it.
     hover: Option<Pick>,
@@ -74,6 +81,7 @@ impl OrnatusApp {
             audit: None,
             show_problems: true,
             paint: PaintTool::default(),
+            pending: None,
             pick_scene: PickScene::default(),
             hover: None,
             inbox: Arc::default(),
@@ -191,9 +199,65 @@ impl OrnatusApp {
         let ready = std::mem::take(&mut *self.inbox.lock().expect("inbox lock"));
         for (name, bytes) in ready {
             match bytes {
-                Ok(bytes) => self.load_bytes(&name, &bytes),
+                Ok(bytes) => self.request_open(name, bytes),
                 Err(error) => self.status = Some(format!("Could not read {name}: {error}")),
             }
+        }
+    }
+
+    /// Open a model, asking first if that would throw paint away.
+    fn request_open(&mut self, name: String, bytes: Vec<u8>) {
+        if self.paint.has_unsaved_paint() {
+            self.pending = Some(Pending::Open(name, bytes));
+        } else {
+            self.load_bytes(&name, &bytes);
+        }
+    }
+
+    /// Choose a paint surface, asking first if that would throw paint away.
+    fn request_surface(&mut self, index: Option<usize>) {
+        if index == self.selected {
+            return;
+        }
+        if self.paint.has_unsaved_paint() {
+            self.pending = Some(Pending::Select(index));
+        } else {
+            self.select_surface(index);
+        }
+    }
+
+    fn confirm_discard(&mut self, ctx: &egui::Context) {
+        let Some(pending) = &self.pending else { return };
+        let what = match pending {
+            Pending::Select(_) => "Choosing another surface",
+            Pending::Open(..) => "Opening another model",
+        };
+        let mut decision = None;
+        egui::Window::new("Discard your paint?")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "{what} throws away the paint on the current surface. This cannot be undone."
+                ));
+                ui.horizontal(|ui| {
+                    if ui.button("Discard and continue").clicked() {
+                        decision = Some(true);
+                    }
+                    if ui.button("Keep painting").clicked() {
+                        decision = Some(false);
+                    }
+                });
+            });
+        match decision {
+            Some(true) => match self.pending.take() {
+                Some(Pending::Select(index)) => self.select_surface(index),
+                Some(Pending::Open(name, bytes)) => self.load_bytes(&name, &bytes),
+                None => {}
+            },
+            Some(false) => self.pending = None,
+            None => {}
         }
     }
 
@@ -249,7 +313,7 @@ impl OrnatusApp {
                 }
             });
         if clicked.is_some() {
-            self.select_surface(clicked);
+            self.request_surface(clicked);
         }
     }
 
@@ -464,6 +528,7 @@ impl eframe::App for OrnatusApp {
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| self.tool_panel(ui));
             });
+        self.confirm_discard(ui.ctx());
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ui, |ui| self.viewport(ui));

@@ -62,7 +62,7 @@ impl PaintTool {
     }
 
     /// True when there is paint the user would lose by leaving.
-    fn has_unsaved_paint(&self) -> bool {
+    pub(super) fn has_unsaved_paint(&self) -> bool {
         self.baked || self.history.can_undo()
     }
 

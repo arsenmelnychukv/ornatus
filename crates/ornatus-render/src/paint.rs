@@ -49,6 +49,29 @@ fn texture(
     format: wgpu::TextureFormat,
     label: &str,
 ) -> wgpu::Texture {
+    texture_with_mips(device, size, format, label, 1)
+}
+
+fn mip_count(size: u32) -> u32 {
+    size.max(1).ilog2() + 1
+}
+
+/// A view of one mip level, which is what a render pass can draw into.
+fn level_view(texture: &wgpu::Texture, level: u32) -> wgpu::TextureView {
+    texture.create_view(&wgpu::TextureViewDescriptor {
+        base_mip_level: level,
+        mip_level_count: Some(1),
+        ..Default::default()
+    })
+}
+
+fn texture_with_mips(
+    device: &wgpu::Device,
+    size: u32,
+    format: wgpu::TextureFormat,
+    label: &str,
+    mips: u32,
+) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
         size: wgpu::Extent3d {
@@ -56,7 +79,7 @@ fn texture(
             height: size,
             depth_or_array_layers: 1,
         },
-        mip_level_count: 1,
+        mip_level_count: mips,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
@@ -398,7 +421,13 @@ impl PaintLayer {
     /// A transparent layer, `size` texels on each side.
     pub fn new(device: &wgpu::Device, size: u32) -> Self {
         let pipelines = Pipelines::new(device);
-        let committed = texture(device, size, COLOR_FORMAT, "ornatus paint committed");
+        let committed = texture_with_mips(
+            device,
+            size,
+            COLOR_FORMAT,
+            "ornatus paint committed",
+            mip_count(size),
+        );
         let base = texture(device, size, COLOR_FORMAT, "ornatus paint base");
         let scratch = texture(device, size, COVERAGE_FORMAT, "ornatus paint scratch");
         let dab_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -428,6 +457,7 @@ impl PaintLayer {
             label: Some("ornatus paint sampler"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
@@ -517,7 +547,7 @@ impl PaintLayer {
     }
 
     fn clear_texture(&self, device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) {
-        let view = texture.create_view(&Default::default());
+        let view = level_view(texture, 0);
         self.submit(device, queue, |encoder| {
             encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("ornatus clear"),
@@ -627,7 +657,7 @@ impl PaintLayer {
             Target::Committed => &self.committed,
             Target::Base => &self.base,
         };
-        let view = texture.create_view(&Default::default());
+        let view = level_view(texture, 0);
         self.submit(device, queue, |encoder| {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("ornatus composite stroke"),
@@ -659,6 +689,7 @@ impl PaintLayer {
     /// the preview.
     pub fn end_stroke(&self, device: &wgpu::Device, queue: &wgpu::Queue, style: &StrokeStyle) {
         self.composite(device, queue, style, Target::Committed);
+        self.generate_mips(device, queue);
         self.clear_texture(device, queue, &self.scratch);
         self.set_preview(queue, None);
     }
@@ -675,6 +706,50 @@ impl PaintLayer {
         self.stamp(device, queue, &style, &stroke.dabs);
         self.composite(device, queue, &style, target);
         self.clear_texture(device, queue, &self.scratch);
+    }
+
+    /// Fill the smaller mip levels of the committed paint, so the surface
+    /// does not shimmer when it is far away.
+    fn generate_mips(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        for level in 1..mip_count(self.size) {
+            let source = level_view(&self.committed, level - 1);
+            let target = level_view(&self.committed, level);
+            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("ornatus mip group"),
+                layout: &self.pipelines.blit_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&source),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+            });
+            self.submit(device, queue, |encoder| {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("ornatus mip"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &target,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.pipelines.blit);
+                pass.set_bind_group(0, &group, &[]);
+                pass.draw(0..3, 0..1);
+            });
+        }
     }
 
     fn copy_base_to_committed(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
@@ -698,6 +773,7 @@ impl PaintLayer {
         for stroke in strokes {
             self.draw_stroke(device, queue, stroke, Target::Committed);
         }
+        self.generate_mips(device, queue);
     }
 
     /// Bake a stroke that can no longer be undone into the base. The layer
@@ -709,6 +785,7 @@ impl PaintLayer {
     /// Remove all paint.
     pub fn clear(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
         self.clear_texture(device, queue, &self.committed);
+        self.generate_mips(device, queue);
         self.clear_texture(device, queue, &self.base);
         self.clear_texture(device, queue, &self.scratch);
         self.set_preview(queue, None);
