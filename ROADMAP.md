@@ -102,11 +102,13 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 - [x] `cargo xtask flawed` writes a test model with one quad per problem.
 - **Done when:** the app knows which surface is paintable and tells the user what is wrong with it. Met. The audit takes about 0.5 s on a 3.7 million triangle surface natively.
 
-### Phase 4: Picking
+### Phase 4: Picking (done)
 
-- CPU ray vs triangle on the selected surface, returning triangle, barycentrics, UV, world point and normal. Back-facing triangles are ignored.
-- Unit tests with known meshes.
-- **Done when:** clicking the surface shows the correct UV coordinate in a debug overlay.
+- [x] CPU ray against every mesh through a BVH, returning mesh, triangle, barycentric weights, UV, world point, normal and which side was hit.
+- [x] Only the selected surface can be hit from its outer side. Another surface in front reports "blocked", and the back side reports "back facing".
+- [x] Camera rays from the pointer. Unit tests cover known meshes, corner UVs, occlusion by the screen, back faces and a comparison with brute force.
+- [x] A readout in the viewport corner (status, triangle, point, UV) with a UV square marking where the cursor is.
+- **Done when:** clicking the surface shows the correct UV coordinate in a debug overlay. Met. On a 3.7 million triangle surface the BVH builds in about 1.3 s natively and a ray costs about one microsecond.
 
 ### Phase 5: Freehand paint
 

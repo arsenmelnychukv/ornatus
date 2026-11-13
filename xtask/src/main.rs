@@ -118,6 +118,20 @@ fn stress(arg: Option<String>) -> ExitCode {
     );
     let mut model = loaded.model;
     let started = std::time::Instant::now();
+    let scene = ornatus_core::pick::PickScene::new(&model);
+    println!("bvh build: {:.2?}", started.elapsed());
+    let started = std::time::Instant::now();
+    let mut hits = 0;
+    for i in 0..10_000 {
+        let f = i as f32 / 10_000.0;
+        let ray = ornatus_core::pick::Ray::new(
+            glam::Vec3::new(f, 1.0, 1.0 - f),
+            glam::Vec3::new(0.0, -1.0, 0.0),
+        );
+        hits += usize::from(scene.nearest(&model, &ray).is_some());
+    }
+    println!("10000 rays: {:.2?} ({hits} hits)", started.elapsed());
+    let started = std::time::Instant::now();
     let scale = model.center_and_fit(2.0);
     println!(
         "center_and_fit: {:.2?} (scale {scale:?})",

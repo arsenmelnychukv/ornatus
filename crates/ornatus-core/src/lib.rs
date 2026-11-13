@@ -7,6 +7,7 @@ use std::fmt;
 
 pub mod camera;
 pub mod model;
+pub mod pick;
 pub mod surface;
 pub mod uv;
 

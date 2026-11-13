@@ -5,6 +5,7 @@ use eframe::egui_wgpu::{self, RenderState};
 use ornatus_core::Mode;
 use ornatus_core::camera::{CameraController, OrbitCamera};
 use ornatus_core::model::{self, LoadWarning, Model};
+use ornatus_core::pick::{Pick, PickScene};
 use ornatus_core::surface::suggest_surface;
 use ornatus_core::uv::{self, UvAudit};
 use ornatus_render::ModelRenderer;
@@ -36,6 +37,9 @@ pub struct OrnatusApp {
     selected: Option<usize>,
     audit: Option<UvAudit>,
     show_problems: bool,
+    pick_scene: PickScene,
+    /// What the cursor is over in the viewport, if it is over it.
+    hover: Option<Pick>,
     /// Dropped files that finished reading, waiting to be loaded.
     inbox: Inbox,
 }
@@ -64,6 +68,8 @@ impl OrnatusApp {
             selected: None,
             audit: None,
             show_problems: true,
+            pick_scene: PickScene::default(),
+            hover: None,
             inbox: Arc::default(),
         };
         app.load_bytes("Default laptop", DEFAULT_MODEL);
@@ -132,6 +138,8 @@ impl OrnatusApp {
                 let mut model = loaded.model;
                 model.center_and_fit(MODEL_SIZE);
                 self.with_renderer(|renderer, device, _| renderer.set_model(device, &model));
+                self.pick_scene = PickScene::new(&model);
+                self.hover = None;
                 self.model = model;
                 self.model_name = name.to_owned();
                 self.controller = CameraController::new(OrbitCamera::default());
@@ -236,6 +244,74 @@ impl OrnatusApp {
         }
     }
 
+    /// Debug readout of what the cursor is over (Phase 4), drawn in the
+    /// bottom left corner of the viewport.
+    fn draw_cursor_overlay(&self, painter: &egui::Painter, viewport: egui::Rect) {
+        let Some(pick) = &self.hover else { return };
+        let (status, hit) = match pick {
+            Pick::Miss => ("Nothing here".to_owned(), None),
+            Pick::Hit(hit) => ("On the paint surface".to_owned(), Some(hit)),
+            Pick::BackFacing(hit) => ("Back of the paint surface".to_owned(), Some(hit)),
+            Pick::Occluded(hit) => (
+                format!("Blocked by {}", self.model.meshes[hit.mesh].name),
+                Some(hit),
+            ),
+        };
+        let mut lines = vec![status];
+        if let Some(hit) = hit {
+            lines.push(format!("Triangle {}", hit.triangle));
+            lines.push(format!(
+                "Point {:.3}, {:.3}, {:.3}",
+                hit.point.x, hit.point.y, hit.point.z
+            ));
+            lines.push(match hit.uv {
+                Some([u, v]) => format!("UV {u:.3}, {v:.3}"),
+                None => "No UV here".to_owned(),
+            });
+        }
+        let font = egui::FontId::proportional(13.0);
+        let line_height = 17.0;
+        let size = egui::vec2(230.0, lines.len() as f32 * line_height + 120.0 + 18.0);
+        let panel = egui::Rect::from_min_size(
+            viewport.left_bottom() + egui::vec2(10.0, -size.y - 10.0),
+            size,
+        );
+        painter.rect_filled(
+            panel,
+            egui::CornerRadius::same(6),
+            egui::Color32::from_black_alpha(190),
+        );
+        for (i, line) in lines.iter().enumerate() {
+            painter.text(
+                panel.min + egui::vec2(8.0, 6.0 + i as f32 * line_height),
+                egui::Align2::LEFT_TOP,
+                line,
+                font.clone(),
+                egui::Color32::from_gray(225),
+            );
+        }
+        let map = egui::Rect::from_min_size(
+            panel.min + egui::vec2(8.0, 10.0 + lines.len() as f32 * line_height),
+            egui::vec2(100.0, 100.0),
+        );
+        painter.rect_filled(
+            map,
+            egui::CornerRadius::same(3),
+            egui::Color32::from_rgb(18, 18, 22),
+        );
+        painter.rect_stroke(
+            map,
+            egui::CornerRadius::same(3),
+            egui::Stroke::new(1.0, egui::Color32::from_gray(90)),
+            egui::StrokeKind::Inside,
+        );
+        // Where in UV space the cursor is. The v axis runs down, like an image.
+        if let (Pick::Hit(_), Some([u, v])) = (pick, hit.and_then(|h| h.uv)) {
+            let at = map.min + egui::vec2(u * map.width(), v * map.height());
+            painter.circle_filled(at, 4.0, egui::Color32::from_rgb(120, 140, 255));
+        }
+    }
+
     fn audit_report(&mut self, ui: &mut egui::Ui) {
         let Some(audit) = &self.audit else {
             ui.label("Pick the surface to paint on.");
@@ -316,6 +392,26 @@ impl OrnatusApp {
 
         let camera = self.controller.camera;
         let aspect = rect.width() / rect.height().max(1.0);
+        self.hover = None;
+        if let (Some(pointer), Some(target)) = (response.hover_pos(), self.selected)
+            && !navigating
+        {
+            let ndc = glam::Vec2::new(
+                (pointer.x - rect.left()) / rect.width().max(1.0) * 2.0 - 1.0,
+                1.0 - (pointer.y - rect.top()) / rect.height().max(1.0) * 2.0,
+            );
+            let pick = self
+                .pick_scene
+                .pick(&self.model, &camera.ray(ndc, aspect), target);
+            self.hover = Some(pick);
+            let color = match pick {
+                Pick::Hit(_) => egui::Color32::from_rgb(120, 220, 150),
+                Pick::BackFacing(_) => egui::Color32::from_rgb(240, 190, 90),
+                Pick::Occluded(_) | Pick::Miss => egui::Color32::from_gray(150),
+            };
+            ui.painter()
+                .circle_stroke(pointer, 7.0, egui::Stroke::new(1.5, color));
+        }
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
             ViewportCallback {
@@ -323,6 +419,7 @@ impl OrnatusApp {
                 eye: camera.eye(),
             },
         ));
+        self.draw_cursor_overlay(&ui.painter_at(rect), rect);
     }
 }
 

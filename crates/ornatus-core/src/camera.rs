@@ -1,6 +1,8 @@
 //! Orbit camera with damping (decision 0005: orbit never fights placement).
 
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec2, Vec3};
+
+use crate::pick::Ray;
 
 const MAX_PITCH: f32 = 1.55;
 const MIN_DISTANCE: f32 = 0.2;
@@ -57,6 +59,14 @@ impl OrbitCamera {
     /// World to clip space.
     pub fn view_projection(&self, aspect: f32) -> Mat4 {
         self.projection(aspect) * self.view()
+    }
+
+    /// The ray through a point of the viewport. `ndc` runs from (-1, -1) at
+    /// the bottom left to (1, 1) at the top right.
+    pub fn ray(&self, ndc: Vec2, aspect: f32) -> Ray {
+        let inverse = self.view_projection(aspect).inverse();
+        let far = inverse.project_point3(ndc.extend(1.0));
+        Ray::new(self.eye(), far - self.eye())
     }
 
     /// Rotate by the given angles, keeping the camera from flipping over.
@@ -153,6 +163,33 @@ mod tests {
         let ndc = clip.truncate() / clip.w;
         assert!(ndc.x.abs() < 1e-5 && ndc.y.abs() < 1e-5);
         assert!((0.0..1.0).contains(&ndc.z), "depth was {}", ndc.z);
+    }
+
+    #[test]
+    fn center_ray_points_at_the_target() {
+        let camera = OrbitCamera::default();
+        let ray = camera.ray(Vec2::ZERO, 1.5);
+        let expected = (camera.target - camera.eye()).normalize();
+        assert!(
+            (ray.dir - expected).length() < 1e-4,
+            "{:?} vs {expected}",
+            ray.dir
+        );
+        assert!((ray.origin - camera.eye()).length() < 1e-6);
+    }
+
+    #[test]
+    fn corner_rays_leave_through_the_matching_corner() {
+        let camera = OrbitCamera::default();
+        let aspect = 2.0;
+        // A ray through the top right must project back to the top right.
+        let ray = camera.ray(Vec2::new(1.0, 1.0), aspect);
+        let clip = camera.view_projection(aspect) * ray.at(3.0).extend(1.0);
+        let ndc = clip.truncate() / clip.w;
+        assert!(
+            (ndc.x - 1.0).abs() < 1e-3 && (ndc.y - 1.0).abs() < 1e-3,
+            "{ndc}"
+        );
     }
 
     #[test]
