@@ -137,6 +137,26 @@ impl OrnatusApp {
     ) -> bool {
         use ornatus_core::Mode;
         let drawing_allowed = self.mode == Mode::Draw && self.can_paint() && !navigating;
+        // A plain click leaves a single dab.
+        if response.clicked_by(egui::PointerButton::Primary)
+            && drawing_allowed
+            && self.paint.current.is_none()
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            let mut builder = StrokeBuilder::new(self.paint.brush());
+            builder.add(self.paint_sample(pointer, rect, aspect));
+            if !builder.is_empty() {
+                self.with_renderer(|renderer, device, queue| {
+                    if let Some((_, layer)) = renderer.paint() {
+                        layer.begin_stroke(device, queue);
+                    }
+                });
+                self.paint.current = Some(builder);
+                self.stamp_new_dabs();
+                self.finish_stroke();
+            }
+            return false;
+        }
         if response.drag_started_by(egui::PointerButton::Primary) && drawing_allowed {
             self.paint.current = Some(StrokeBuilder::new(self.paint.brush()));
             // Start the path where the button went down, so even a very fast
@@ -260,6 +280,10 @@ impl OrnatusApp {
     /// Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y.
     pub(super) fn paint_shortcuts(&mut self, ctx: &egui::Context) {
         use egui::{Key, Modifiers};
+        // Typing in a field has its own undo.
+        if ctx.egui_wants_keyboard_input() {
+            return;
+        }
         let (redo, undo) = ctx.input_mut(|input| {
             let redo = input.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z)
                 || input.consume_key(Modifiers::COMMAND, Key::Y);

@@ -11,6 +11,8 @@
 //!
 //! Only render passes are used (no compute), so this works on WebGL2.
 
+use std::sync::Arc;
+
 use bytemuck::{Pod, Zeroable};
 use ornatus_core::paint::{Brush, Stroke};
 use wgpu::util::DeviceExt as _;
@@ -411,6 +413,25 @@ enum Target {
     Base,
 }
 
+/// Pipelines and helpers every paint layer uses. Building them compiles
+/// shaders, so they are made once and shared instead of per surface.
+pub struct PaintShared {
+    pipelines: Pipelines,
+    mipper: Mipper,
+    sticker_pass: StickerPass,
+}
+
+impl PaintShared {
+    /// Build the shared pipelines.
+    pub fn new(device: &wgpu::Device) -> Self {
+        Self {
+            pipelines: Pipelines::new(device),
+            mipper: Mipper::new(device),
+            sticker_pass: StickerPass::new(device),
+        }
+    }
+}
+
 /// The paint layer for one surface.
 pub struct PaintLayer {
     size: u32,
@@ -419,9 +440,7 @@ pub struct PaintLayer {
     scratch: wgpu::Texture,
     /// Every sticker drawn in order, in UV space.
     stickers: wgpu::Texture,
-    sticker_pass: StickerPass,
-    mipper: Mipper,
-    pipelines: Pipelines,
+    shared: Arc<PaintShared>,
     dab_buffer: wgpu::Buffer,
     stroke_buffer: wgpu::Buffer,
     preview_buffer: wgpu::Buffer,
@@ -433,8 +452,8 @@ pub struct PaintLayer {
 
 impl PaintLayer {
     /// A transparent layer, `size` texels on each side.
-    pub fn new(device: &wgpu::Device, size: u32) -> Self {
-        let pipelines = Pipelines::new(device);
+    pub fn new(device: &wgpu::Device, size: u32, shared: Arc<PaintShared>) -> Self {
+        let pipelines = &shared.pipelines;
         let committed = texture_with_mips(
             device,
             size,
@@ -542,9 +561,7 @@ impl PaintLayer {
             base,
             scratch,
             stickers,
-            sticker_pass: StickerPass::new(device),
-            mipper: Mipper::new(device),
-            pipelines,
+            shared,
             dab_buffer,
             stroke_buffer,
             preview_buffer,
@@ -639,7 +656,7 @@ impl PaintLayer {
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
-                pass.set_pipeline(&self.pipelines.dab);
+                pass.set_pipeline(&self.shared.pipelines.dab);
                 pass.set_bind_group(0, &self.dab_group, &[]);
                 pass.set_vertex_buffer(0, self.dab_buffer.slice(..));
                 pass.draw(0..6, 0..instances.len() as u32);
@@ -706,9 +723,9 @@ impl PaintLayer {
                 multiview_mask: None,
             });
             pass.set_pipeline(if style.erase {
-                &self.pipelines.erase
+                &self.shared.pipelines.erase
             } else {
-                &self.pipelines.paint
+                &self.shared.pipelines.paint
             });
             pass.set_bind_group(0, &self.composite_group, &[]);
             pass.draw(0..3, 0..1);
@@ -741,7 +758,8 @@ impl PaintLayer {
     /// Fill the smaller mip levels of the committed paint, so the surface
     /// does not shimmer when it is far away.
     fn generate_mips(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        self.mipper
+        self.shared
+            .mipper
             .generate(device, queue, &self.committed, self.size, self.size);
     }
 
@@ -753,9 +771,11 @@ impl PaintLayer {
         images: &StickerImages,
         draws: &[StickerDraw],
     ) {
-        self.sticker_pass
+        self.shared
+            .sticker_pass
             .render(device, queue, &self.stickers, images, draws);
-        self.mipper
+        self.shared
+            .mipper
             .generate(device, queue, &self.stickers, self.size, self.size);
     }
 
@@ -807,11 +827,11 @@ impl PaintLayer {
         size: u32,
         strokes: &[Stroke],
     ) -> Self {
-        let new = Self::new(device, size);
+        let new = Self::new(device, size, Arc::clone(&self.shared));
         let source = self.base.create_view(&Default::default());
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("ornatus resize group"),
-            layout: &new.pipelines.blit_layout,
+            layout: &new.shared.pipelines.blit_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -841,7 +861,7 @@ impl PaintLayer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&new.pipelines.blit);
+            pass.set_pipeline(&new.shared.pipelines.blit);
             pass.set_bind_group(0, &group, &[]);
             pass.draw(0..3, 0..1);
         });

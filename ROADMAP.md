@@ -137,10 +137,14 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 - Known limits: the rotation handle and corners are only drawn where the sticker sits on the surface, so a sticker hanging over the edge hides them. Importing more than one image is supported, but there is no delete for an imported image.
 - **Done when:** the v0.1 acceptance criteria below pass, except export.
 
-### Phase 7: Screenshot export
+### Phase 7: Screenshot export (done)
 
-- Transparent PNG at 1x, 2x or 4x of the viewport from the current camera angle.
-- **Done when:** the exported image matches the viewport with a transparent background.
+- [x] The model is drawn into an offscreen texture from the current camera at 1x, 2x or 4x of the viewport, on a transparent background, then read back without blocking and saved as a PNG. Paint and stickers are included. The selection tint and the red problem overlay are left out.
+- [x] The browser build downloads `ornatus.png`. The desktop dev build writes `ornatus-<seconds>.png` in the current folder.
+- [x] The size shrinks to fit the GPU's texture limit and a 25 million pixel memory cap, and the panel says when it did.
+- [x] Checked in the browser: a 1364 by 1586 PNG with a transparent corner, opaque model pixels and matching colors.
+- Not checked: Safari and Firefox downloads, and the 4x size on a real high-resolution display.
+- **Done when:** the exported image matches the viewport with a transparent background. Met.
 
 ### Phase 8: Polish and v0.1 release
 

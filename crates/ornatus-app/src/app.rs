@@ -12,9 +12,11 @@ use ornatus_render::ModelRenderer;
 
 use crate::theme;
 
+mod export_tool;
 mod paint_tool;
 mod sticker_tool;
 use crate::viewport::ViewportCallback;
+use export_tool::ExportTool;
 use paint_tool::PaintTool;
 use sticker_tool::StickerTool;
 
@@ -50,6 +52,7 @@ pub struct OrnatusApp {
     show_problems: bool,
     paint: PaintTool,
     stickers: StickerTool,
+    export: ExportTool,
     pending: Option<Pending>,
     pick_scene: PickScene,
     /// What the cursor is over in the viewport, if it is over it.
@@ -85,6 +88,7 @@ impl OrnatusApp {
             show_problems: true,
             paint: PaintTool::default(),
             stickers: StickerTool::default(),
+            export: ExportTool::default(),
             pending: None,
             pick_scene: PickScene::default(),
             hover: None,
@@ -300,6 +304,8 @@ impl OrnatusApp {
             ui.colored_label(egui::Color32::from_rgb(240, 190, 90), status);
         }
         ui.separator();
+        self.export_panel(ui);
+        ui.separator();
         self.surface_list(ui);
         self.audit_report(ui);
         ui.separator();
@@ -486,6 +492,7 @@ impl OrnatusApp {
 
         let camera = self.controller.camera;
         let aspect = rect.width() / rect.height().max(1.0);
+        self.export_frame(ui.ctx(), rect, aspect);
         let drawing = self.paint_input(&response, rect, aspect, navigating);
         self.sticker_input(&response, rect, aspect, navigating);
         self.hover = None;

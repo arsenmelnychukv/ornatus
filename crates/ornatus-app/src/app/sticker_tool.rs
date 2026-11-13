@@ -307,8 +307,8 @@ impl OrnatusApp {
     }
 
     fn duplicate_selected(&mut self) {
+        self.commit_working();
         if let Some(mut copy) = self.selected_sticker() {
-            self.stickers.working = None;
             copy.center += Vec2::splat(0.03);
             self.add_sticker(copy);
         }
@@ -529,8 +529,7 @@ impl OrnatusApp {
         {
             let near = |p: egui::Pos2| p.distance(origin) <= HANDLE_RADIUS;
             if near(rotate) {
-                let offset =
-                    Vec2::new(rotate_dir(&sticker, uv, k).x, rotate_dir(&sticker, uv, k).y);
+                let offset = rotate_dir(&sticker, uv, k);
                 let start_angle = offset.y.atan2(offset.x);
                 self.stickers.drag = Some(Drag {
                     kind: DragKind::Rotate { start_angle },
@@ -538,7 +537,14 @@ impl OrnatusApp {
                 });
                 return;
             }
-            if corners.iter().any(|&c| near(c)) {
+            // On a small sticker the corner handles sit on top of the body, so a
+            // press inside it moves the sticker instead of scaling it.
+            let shortest_side = (0..4)
+                .map(|i| corners[i].distance(corners[(i + 1) % 4]))
+                .fold(f32::MAX, f32::min);
+            let pressed_inside = uv.is_some_and(|uv| sticker.contains(uv, k));
+            let crowded = shortest_side < 4.0 * HANDLE_RADIUS && pressed_inside;
+            if !crowded && corners.iter().any(|&c| near(c)) {
                 self.stickers.drag = Some(Drag {
                     kind: DragKind::Scale,
                     start: sticker,

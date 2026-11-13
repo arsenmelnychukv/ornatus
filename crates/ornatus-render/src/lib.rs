@@ -3,6 +3,7 @@
 //! Render passes only, no compute shaders, so the WebGL2 fallback works
 //! (decision 0002).
 
+mod capture;
 mod paint;
 mod sticker;
 
@@ -11,7 +12,8 @@ use glam::{Mat4, Vec3};
 use ornatus_core::model::{MeshData, Model};
 use wgpu::util::DeviceExt as _;
 
-pub use paint::{PaintLayer, StrokeStyle};
+pub use capture::{CapturedImage, ImageCapture};
+pub use paint::{PaintLayer, PaintShared, StrokeStyle};
 pub use sticker::{StickerDraw, StickerImages};
 
 /// Depth format the viewport expects from its render pass.
@@ -66,6 +68,8 @@ pub struct ModelRenderer {
     empty_paint: wgpu::BindGroup,
     paint: Option<(usize, PaintLayer)>,
     sticker_images: StickerImages,
+    paint_shared: std::sync::Arc<PaintShared>,
+    color_format: wgpu::TextureFormat,
     manual_srgb: bool,
     /// One entry per mesh in the model, `None` for meshes with no triangles.
     meshes: Vec<Option<GpuMesh>>,
@@ -216,6 +220,8 @@ impl ModelRenderer {
             empty_paint,
             paint: None,
             sticker_images: StickerImages::new(device),
+            paint_shared: std::sync::Arc::new(PaintShared::new(device)),
+            color_format,
             manual_srgb: !color_format.is_srgb(),
             meshes: Vec::new(),
             selected: None,
@@ -290,7 +296,8 @@ impl ModelRenderer {
     /// Paint on this mesh from now on, with a fresh transparent layer, or on
     /// nothing with `None`. Any previous paint is dropped.
     pub fn set_paint_surface(&mut self, device: &wgpu::Device, mesh: Option<usize>, size: u32) {
-        self.paint = mesh.map(|mesh| (mesh, PaintLayer::new(device, size)));
+        let shared = std::sync::Arc::clone(&self.paint_shared);
+        self.paint = mesh.map(|mesh| (mesh, PaintLayer::new(device, size, shared)));
     }
 
     /// The paint layer and the mesh it belongs to, if a surface is chosen.
@@ -389,8 +396,131 @@ impl ModelRenderer {
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
     }
 
+    /// Render the model to an image of this size from this camera, on a
+    /// transparent background, without the selection tint or problem
+    /// overlay. The result arrives later through [`ImageCapture::poll`].
+    pub fn begin_capture(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        view_projection: Mat4,
+        eye: Vec3,
+    ) -> Result<ImageCapture, String> {
+        let limit = device.limits().max_texture_dimension_2d;
+        if width == 0 || height == 0 || width > limit || height > limit {
+            return Err(format!(
+                "{width} by {height} pixels does not fit this GPU (limit {limit})"
+            ));
+        }
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let color = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("ornatus capture color"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.color_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let depth = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("ornatus capture depth"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let padded_row = capture::padded_row_bytes(width);
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ornatus capture buffer"),
+            size: u64::from(padded_row) * u64::from(height),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        // The on-screen frame sets its own camera later, after this is submitted.
+        self.set_camera(queue, view_projection, eye);
+        let selected = self.selected;
+        self.set_selected(queue, None);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        {
+            let color_view = color.create_view(&Default::default());
+            let depth_view = depth.create_view(&Default::default());
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("ornatus capture"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &color_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            self.draw_scene(&mut pass, false);
+        }
+        encoder.copy_texture_to_buffer(
+            color.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            size,
+        );
+        queue.submit([encoder.finish()]);
+        self.set_selected(queue, selected);
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = sender.send(result);
+            });
+        Ok(ImageCapture {
+            buffer,
+            width,
+            height,
+            padded_row,
+            bgra: matches!(
+                self.color_format,
+                wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+            ),
+            receiver,
+        })
+    }
+
     /// Draw the model into a render pass that has a [`DEPTH_FORMAT`] depth attachment.
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
+        self.draw_scene(pass, true);
+    }
+
+    /// Draw the meshes, and optionally the red problem areas on top.
+    fn draw_scene(&self, pass: &mut wgpu::RenderPass<'_>, overlay: bool) {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.camera_bind_group, &[]);
         let painted = self
@@ -409,7 +539,8 @@ impl ModelRenderer {
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..mesh.index_count, 0, 0..1);
         }
-        if let Some(overlay) = &self.overlay
+        if overlay
+            && let Some(overlay) = &self.overlay
             && let Some(Some(mesh)) = self.meshes.get(overlay.mesh)
         {
             pass.set_pipeline(&self.overlay_pipeline);

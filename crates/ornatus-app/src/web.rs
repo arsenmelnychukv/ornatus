@@ -143,3 +143,31 @@ pub fn set_leave_warning(on: bool) {
         }
     });
 }
+
+/// Hand bytes to the browser as a file download.
+pub fn download(name: &str, mime: &str, bytes: &[u8]) -> Result<(), wasm_bindgen::JsValue> {
+    use wasm_bindgen::JsCast as _;
+
+    let parts = js_sys::Array::new();
+    parts.push(&js_sys::Uint8Array::from(bytes));
+    let options = web_sys::BlobPropertyBag::new();
+    options.set_type(mime);
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &options)?;
+    let url = web_sys::Url::create_object_url_with_blob(&blob)?;
+    let anchor = document()
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e))?
+        .create_element("a")?
+        .dyn_into::<web_sys::HtmlAnchorElement>()?;
+    anchor.set_href(&url);
+    anchor.set_download(name);
+    anchor.click();
+    // Give the browser a moment to start the download before releasing the file.
+    if let Some(window) = web_sys::window() {
+        let release = wasm_bindgen::closure::Closure::once_into_js(move || {
+            let _ = web_sys::Url::revoke_object_url(&url);
+        });
+        let _ = window
+            .set_timeout_with_callback_and_timeout_and_arguments_0(release.unchecked_ref(), 10_000);
+    }
+    Ok(())
+}
