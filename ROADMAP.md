@@ -110,15 +110,19 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 - [x] A readout in the viewport corner (status, triangle, point, UV) with a UV square marking where the cursor is.
 - **Done when:** clicking the surface shows the correct UV coordinate in a debug overlay. Met. On a 3.7 million triangle surface the BVH builds in about 1.3 s natively and a ray costs about one microsecond.
 
-### Phase 5: Freehand paint
+### Phase 5: Freehand paint (built, two known gaps)
 
-- Stroke layer texture on the GPU, 2K by default, 4K selectable.
-- Brush: color, size, opacity, hardness. Smooth interpolation between pointer samples. Eraser.
-- Modes (Place, Select, Draw) and the orbit rules from decision 0005.
-- Undo and redo (Ctrl+Z, Ctrl+Shift+Z): 100 steps, or 50 if checkpoint memory is too heavy. Measure here.
-- Seam handling between UV islands.
-- Unsaved-changes warning when leaving the page.
-- **Done when:** the user draws on the surface and undoes mistakes cleanly.
+- [x] Paint layer texture on the GPU, 2K by default and 4K selectable. Strokes are drawn into a coverage texture and composited at the stroke's opacity, so overlapping dabs do not darken a stroke.
+- [x] Brush with color, size, opacity and hardness, and an eraser.
+- [x] Undo and redo (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y and buttons) with 100 steps. Strokes that fall off the end are baked into a base texture.
+- [x] Draw mode uses the left button. Orbit uses the right or middle button, or Space, and never starts a stroke.
+- [x] Pointer paths are sampled every 3 pixels. Samples that jump across UV islands are not joined by a line.
+- [x] Unsaved-changes warning when leaving the page (browser build).
+- [x] A brush outline under the cursor, sized to the paint on the surface.
+- [ ] **Gap: seam padding.** Paint at the edge of a UV island is not extended past the edge, so a thin seam can show when the texture is filtered.
+- [ ] **Gap: mipmaps.** The paint texture has no mipmaps, so strokes can shimmer when the model is far away.
+- Not done by design for v0.1: choosing another surface discards the paint on the old one.
+- **Done when:** the user draws on the surface and undoes mistakes cleanly. Met in the browser build.
 
 ### Phase 6: Stickers
 

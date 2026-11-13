@@ -18,6 +18,19 @@ struct Material {
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(1) @binding(0) var<uniform> material: Material;
 
+// Freehand paint on the selected surface (see paint.wgsl). Premultiplied sRGB.
+struct StrokePreview {
+    // rgb: color (sRGB), a: opacity.
+    color: vec4<f32>,
+    // x: 1 when erasing, y: 1 while a stroke is being drawn.
+    flags: vec4<f32>,
+}
+
+@group(2) @binding(0) var paint_texture: texture_2d<f32>;
+@group(2) @binding(1) var stroke_coverage: texture_2d<f32>;
+@group(2) @binding(2) var paint_sampler: sampler;
+@group(2) @binding(3) var<uniform> preview: StrokePreview;
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -28,6 +41,7 @@ struct VertexOutput {
     @builtin(position) clip: vec4<f32>,
     @location(0) world: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
 }
 
 @vertex
@@ -36,6 +50,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     out.clip = camera.view_proj * vec4<f32>(input.position, 1.0);
     out.world = input.position;
     out.normal = input.normal;
+    out.uv = input.uv;
     return out;
 }
 
@@ -66,6 +81,22 @@ fn env_brdf(f0: vec3<f32>, roughness: f32, n_dot_v: f32) -> vec3<f32> {
     return f0 * ab.x + vec3<f32>(ab.y);
 }
 
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    return pow(c, vec3<f32>(2.2));
+}
+
+// The paint at a point, including the stroke that is still being drawn.
+fn paint_at(uv: vec2<f32>) -> vec4<f32> {
+    var paint = textureSample(paint_texture, paint_sampler, uv);
+    let coverage = textureSample(stroke_coverage, paint_sampler, uv).r * preview.color.a * preview.flags.y;
+    if preview.flags.x > 0.5 {
+        paint = paint * (1.0 - coverage);
+    } else {
+        paint = vec4<f32>(preview.color.rgb * coverage, coverage) + paint * (1.0 - coverage);
+    }
+    return paint;
+}
+
 fn tonemap(c: vec3<f32>) -> vec3<f32> {
     // ACES filmic approximation (Narkowicz).
     let x = c * 0.7;
@@ -80,7 +111,12 @@ fn fs_main(input: VertexOutput, @builtin(front_facing) front: bool) -> @location
     }
     let v = normalize(camera.eye.xyz - input.world);
     let n_dot_v = max(dot(n, v), 1e-3);
-    let albedo = material.base_color.rgb;
+    // Texture reads must happen in uniform control flow, before any branches.
+    let paint = paint_at(input.uv);
+    var albedo = material.base_color.rgb;
+    if paint.a > 1e-4 {
+        albedo = mix(albedo, srgb_to_linear(paint.rgb / paint.a), paint.a);
+    }
     let metallic = clamp(material.params.x, 0.0, 1.0);
     let roughness = clamp(material.params.y, 0.04, 1.0);
 

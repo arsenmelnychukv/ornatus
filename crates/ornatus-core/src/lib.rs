@@ -7,8 +7,10 @@ use std::fmt;
 
 pub mod camera;
 pub mod model;
+pub mod paint;
 pub mod pick;
 pub mod surface;
+pub mod undo;
 pub mod uv;
 
 /// The tool the user is currently working with (see decision 0005).

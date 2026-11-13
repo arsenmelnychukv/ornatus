@@ -56,6 +56,8 @@ pub struct SurfaceHit {
     pub uv: Option<[f32; 2]>,
     /// True when the ray arrived from the triangle's outward side.
     pub front_face: bool,
+    /// How many UV units one world unit covers on this triangle, if it has UVs.
+    pub uv_per_world: Option<f32>,
 }
 
 /// What a ray found, judged against the surface the user wants to paint.
@@ -313,6 +315,14 @@ fn describe(
         }
         out
     });
+    let uv_per_world = mesh.uvs.as_ref().and_then(|uvs| {
+        let uv_area = {
+            let [p, q, r] = i.map(|i| glam::Vec2::from(uvs[i]));
+            (q - p).perp_dot(r - p).abs() / 2.0
+        };
+        let world_area = (b - a).cross(c - a).length() / 2.0;
+        (uv_area > 0.0 && world_area > 1e-12).then(|| (uv_area / world_area).sqrt())
+    });
     SurfaceHit {
         mesh: mesh_index,
         triangle,
@@ -322,6 +332,7 @@ fn describe(
         barycentric: weights,
         uv,
         front_face: normal.dot(ray.dir) < 0.0,
+        uv_per_world,
     }
 }
 
@@ -404,6 +415,9 @@ mod tests {
         assert!((hit.point - center).length() < 1e-4);
         assert!(hit.normal.dot(normal) > 0.999 && hit.front_face);
         assert!((hit.distance - 0.5).abs() < 1e-4);
+        // The lid panel is 0.30 by 0.21 m before fitting, and spans the whole UV square.
+        let scale = hit.uv_per_world.expect("uv scale");
+        assert!(scale > 0.1 && scale.is_finite(), "{scale}");
     }
 
     #[test]

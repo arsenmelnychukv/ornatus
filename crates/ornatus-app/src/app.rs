@@ -11,7 +11,10 @@ use ornatus_core::uv::{self, UvAudit};
 use ornatus_render::ModelRenderer;
 
 use crate::theme;
+
+mod paint_tool;
 use crate::viewport::ViewportCallback;
+use paint_tool::PaintTool;
 
 const DEFAULT_MODEL: &[u8] = include_bytes!("../assets/default-laptop.glb");
 /// The longest side of any loaded model is scaled to this many units.
@@ -37,6 +40,7 @@ pub struct OrnatusApp {
     selected: Option<usize>,
     audit: Option<UvAudit>,
     show_problems: bool,
+    paint: PaintTool,
     pick_scene: PickScene,
     /// What the cursor is over in the viewport, if it is over it.
     hover: Option<Pick>,
@@ -59,7 +63,8 @@ impl OrnatusApp {
             .callback_resources
             .insert(renderer);
         let mut app = Self {
-            mode: Mode::default(),
+            // Drawing is the only tool so far, so start there.
+            mode: Mode::Draw,
             render_state,
             model: Model::default(),
             model_name: String::new(),
@@ -68,6 +73,7 @@ impl OrnatusApp {
             selected: None,
             audit: None,
             show_problems: true,
+            paint: PaintTool::default(),
             pick_scene: PickScene::default(),
             hover: None,
             inbox: Arc::default(),
@@ -100,6 +106,7 @@ impl OrnatusApp {
         self.selected = index.filter(|&i| i < self.model.meshes.len());
         self.audit = self.selected.map(|i| uv::audit(&self.model.meshes[i]));
         self.refresh_highlights();
+        self.reset_paint_surface();
     }
 
     fn refresh_highlights(&self) {
@@ -212,6 +219,8 @@ impl OrnatusApp {
         ui.separator();
         self.surface_list(ui);
         self.audit_report(ui);
+        ui.separator();
+        self.brush_panel(ui);
     }
 
     fn surface_list(&mut self, ui: &mut egui::Ui) {
@@ -392,6 +401,7 @@ impl OrnatusApp {
 
         let camera = self.controller.camera;
         let aspect = rect.width() / rect.height().max(1.0);
+        let drawing = self.paint_input(&response, rect, aspect, navigating);
         self.hover = None;
         if let (Some(pointer), Some(target)) = (response.hover_pos(), self.selected)
             && !navigating
@@ -409,8 +419,15 @@ impl OrnatusApp {
                 Pick::BackFacing(_) => egui::Color32::from_rgb(240, 190, 90),
                 Pick::Occluded(_) | Pick::Miss => egui::Color32::from_gray(150),
             };
-            ui.painter()
-                .circle_stroke(pointer, 7.0, egui::Stroke::new(1.5, color));
+            if self.mode == Mode::Draw && self.can_paint() && matches!(pick, Pick::Hit(_)) {
+                self.draw_brush_ring(&ui.painter_at(rect), pointer, rect, aspect);
+            } else {
+                ui.painter()
+                    .circle_stroke(pointer, 7.0, egui::Stroke::new(1.5, color));
+            }
+        }
+        if drawing {
+            ui.request_repaint();
         }
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
@@ -440,6 +457,7 @@ fn describe_warning(warning: &LoadWarning) -> String {
 impl eframe::App for OrnatusApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_dropped_files(ui.ctx());
+        self.paint_shortcuts(ui.ctx());
         egui::Panel::left("tools")
             .resizable(false)
             .exact_size(220.0)

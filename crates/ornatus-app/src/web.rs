@@ -103,3 +103,39 @@ fn try_pick_file(inbox: Inbox, ctx: eframe::egui::Context) -> Result<(), wasm_bi
     input.click();
     Ok(())
 }
+
+type LeaveHandler = wasm_bindgen::closure::Closure<dyn FnMut(web_sys::BeforeUnloadEvent)>;
+
+thread_local! {
+    static LEAVE_WARNING: std::cell::RefCell<Option<LeaveHandler>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Ask the browser to confirm before the page is closed or reloaded
+/// (decision 0003: unsaved edits warn on leaving).
+pub fn set_leave_warning(on: bool) {
+    use wasm_bindgen::JsCast as _;
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    LEAVE_WARNING.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if on && slot.is_none() {
+            let closure =
+                wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::BeforeUnloadEvent)>::new(
+                    |event: web_sys::BeforeUnloadEvent| {
+                        event.prevent_default();
+                        event.set_return_value("");
+                    },
+                );
+            let _ = window
+                .add_event_listener_with_callback("beforeunload", closure.as_ref().unchecked_ref());
+            *slot = Some(closure);
+        } else if !on && let Some(closure) = slot.take() {
+            let _ = window.remove_event_listener_with_callback(
+                "beforeunload",
+                closure.as_ref().unchecked_ref(),
+            );
+        }
+    });
+}

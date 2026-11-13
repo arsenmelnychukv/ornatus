@@ -3,10 +3,14 @@
 //! Render passes only, no compute shaders, so the WebGL2 fallback works
 //! (decision 0002).
 
+mod paint;
+
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 use ornatus_core::model::{MeshData, Model};
 use wgpu::util::DeviceExt as _;
+
+pub use paint::{PaintLayer, StrokeStyle};
 
 /// Depth format the viewport expects from its render pass.
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -56,6 +60,9 @@ pub struct ModelRenderer {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     material_layout: wgpu::BindGroupLayout,
+    /// Bound for meshes that have no paint.
+    empty_paint: wgpu::BindGroup,
+    paint: Option<(usize, PaintLayer)>,
     manual_srgb: bool,
     /// One entry per mesh in the model, `None` for meshes with no triangles.
     meshes: Vec<Option<GpuMesh>>,
@@ -143,9 +150,15 @@ impl ModelRenderer {
             label: Some("ornatus material layout"),
             entries: &[uniform_entry(wgpu::ShaderStages::FRAGMENT)],
         });
+        let paint_layout = paint::model_paint_layout(device);
+        let empty_paint = paint::empty_model_paint_group(device, &paint_layout);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("ornatus model layout"),
-            bind_group_layouts: &[Some(&camera_layout), Some(&material_layout)],
+            bind_group_layouts: &[
+                Some(&camera_layout),
+                Some(&material_layout),
+                Some(&paint_layout),
+            ],
             immediate_size: 0,
         });
         let pipeline = build_pipeline(
@@ -197,6 +210,8 @@ impl ModelRenderer {
             camera_buffer,
             camera_bind_group,
             material_layout,
+            empty_paint,
+            paint: None,
             manual_srgb: !color_format.is_srgb(),
             meshes: Vec::new(),
             selected: None,
@@ -215,6 +230,7 @@ impl ModelRenderer {
             .collect();
         self.selected = None;
         self.overlay = None;
+        self.paint = None;
     }
 
     fn upload(&self, device: &wgpu::Device, mesh: &MeshData) -> GpuMesh {
@@ -264,6 +280,25 @@ impl ModelRenderer {
             }),
             material_buffer,
             material_values,
+        }
+    }
+
+    /// Paint on this mesh from now on, with a fresh transparent layer, or on
+    /// nothing with `None`. Any previous paint is dropped.
+    pub fn set_paint_surface(&mut self, device: &wgpu::Device, mesh: Option<usize>, size: u32) {
+        self.paint = mesh.map(|mesh| (mesh, PaintLayer::new(device, size)));
+    }
+
+    /// The paint layer and the mesh it belongs to, if a surface is chosen.
+    pub fn paint(&self) -> Option<(usize, &PaintLayer)> {
+        self.paint.as_ref().map(|(mesh, layer)| (*mesh, layer))
+    }
+
+    /// Swap in a replacement layer for the current paint surface (for example
+    /// after a resize).
+    pub fn replace_paint(&mut self, layer: PaintLayer) {
+        if let Some((_, current)) = &mut self.paint {
+            *current = layer;
         }
     }
 
@@ -328,8 +363,18 @@ impl ModelRenderer {
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.camera_bind_group, &[]);
-        for mesh in self.meshes.iter().flatten() {
+        let painted = self
+            .paint
+            .as_ref()
+            .map(|(mesh, layer)| (*mesh, layer.model_group()));
+        for (index, mesh) in self.meshes.iter().enumerate() {
+            let Some(mesh) = mesh else { continue };
+            let paint_group = match painted {
+                Some((painted_mesh, group)) if painted_mesh == index => group,
+                _ => &self.empty_paint,
+            };
             pass.set_bind_group(1, &mesh.material, &[]);
+            pass.set_bind_group(2, paint_group, &[]);
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..mesh.index_count, 0, 0..1);
@@ -339,6 +384,7 @@ impl ModelRenderer {
         {
             pass.set_pipeline(&self.overlay_pipeline);
             pass.set_bind_group(1, &mesh.material, &[]);
+            pass.set_bind_group(2, &self.empty_paint, &[]);
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.set_index_buffer(overlay.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..overlay.index_count, 0, 0..1);
@@ -348,15 +394,24 @@ impl ModelRenderer {
 
 #[cfg(test)]
 mod tests {
-    /// The shader must parse and validate without a GPU.
-    #[test]
-    fn model_shader_is_valid_wgsl() {
-        let module = naga::front::wgsl::parse_str(include_str!("model.wgsl")).expect("parses");
+    fn validate(source: &str) {
+        let module = naga::front::wgsl::parse_str(source).expect("parses");
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::empty(),
         )
         .validate(&module)
         .expect("validates");
+    }
+
+    /// The shaders must parse and validate without a GPU.
+    #[test]
+    fn model_shader_is_valid_wgsl() {
+        validate(include_str!("model.wgsl"));
+    }
+
+    #[test]
+    fn paint_shader_is_valid_wgsl() {
+        validate(include_str!("paint.wgsl"));
     }
 }
