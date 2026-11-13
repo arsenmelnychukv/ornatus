@@ -1881,10 +1881,13 @@ dependencies = [
  "eframe",
  "env_logger",
  "glam",
+ "js-sys",
  "log",
  "ornatus-core",
  "ornatus-render",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
+ "web-sys",
  "wgpu",
 ]
 
@@ -1911,6 +1914,7 @@ version = "0.0.0"
 dependencies = [
  "bytemuck",
  "glam",
+ "naga",
  "ornatus-core",
  "wgpu",
 ]
@@ -3473,6 +3477,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 name = "xtask"
 version = "0.0.0"
 dependencies = [
+ "ornatus-core",
  "ornatus-fixtures",
 ]
 

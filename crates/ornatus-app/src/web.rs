@@ -5,6 +5,7 @@ use eframe::wasm_bindgen::JsCast as _;
 use eframe::web_sys;
 
 use crate::OrnatusApp;
+use crate::app::Inbox;
 
 const UNSUPPORTED: &str = "ornatus needs a browser with WebGPU or WebGL2. \
 Please use a current version of Chrome, Edge, Firefox or Safari on a desktop.";
@@ -65,4 +66,40 @@ pub fn show_unsupported() {
         "color:#ddd;font-family:sans-serif;max-width:32em;margin:3em auto;padding:0 1em",
     );
     let _ = body.append_child(&message);
+}
+
+/// Open the browser's file picker and queue the chosen `.glb` for loading.
+pub fn pick_file(inbox: Inbox, ctx: eframe::egui::Context) {
+    if let Err(error) = try_pick_file(inbox, ctx) {
+        log::error!("file picker failed: {error:?}");
+    }
+}
+
+fn try_pick_file(inbox: Inbox, ctx: eframe::egui::Context) -> Result<(), wasm_bindgen::JsValue> {
+    use wasm_bindgen::{JsCast as _, closure::Closure};
+
+    let document = document().map_err(|e| wasm_bindgen::JsValue::from_str(&e))?;
+    let input = document
+        .create_element("input")?
+        .dyn_into::<web_sys::HtmlInputElement>()?;
+    input.set_type("file");
+    input.set_accept(".glb,model/gltf-binary");
+    let source = input.clone();
+    let on_change = Closure::once_into_js(move || {
+        let Some(file) = source.files().and_then(|files| files.get(0)) else {
+            return;
+        };
+        let name = file.name();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = wasm_bindgen_futures::JsFuture::from(file.array_buffer())
+                .await
+                .map(|buffer| js_sys::Uint8Array::new(&buffer).to_vec())
+                .map_err(|e| format!("{e:?}"));
+            inbox.lock().expect("inbox lock").push((name, result));
+            ctx.request_repaint();
+        });
+    });
+    input.set_onchange(Some(on_change.unchecked_ref()));
+    input.click();
+    Ok(())
 }

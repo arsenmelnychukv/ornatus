@@ -11,7 +11,13 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "ornatus",
         options,
-        Box::new(|cc| Ok(Box::new(ornatus_app::OrnatusApp::new(cc)))),
+        Box::new(|cc| {
+            let mut app = ornatus_app::OrnatusApp::new(cc);
+            if let Some(path) = std::env::args_os().nth(1) {
+                app.open_path(std::path::Path::new(&path));
+            }
+            Ok(Box::new(app))
+        }),
     )
 }
 

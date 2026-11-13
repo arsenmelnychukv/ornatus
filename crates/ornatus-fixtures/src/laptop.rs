@@ -201,3 +201,47 @@ pub fn triangle_glb(with_uvs: bool) -> Vec<u8> {
     }
     .to_glb()
 }
+
+/// A flat grid of `side` x `side` vertices, for load and memory stress tests.
+/// Each vertex costs about 56 bytes in the file (32 for attributes, 24 for indices).
+pub fn grid_glb(side: u32) -> Vec<u8> {
+    let step = 1.0 / (side.saturating_sub(1).max(1)) as f32;
+    let count = (side * side) as usize;
+    let mut positions = Vec::with_capacity(count);
+    let mut uvs = Vec::with_capacity(count);
+    for i in 0..side {
+        for j in 0..side {
+            let (x, z) = (i as f32 * step, j as f32 * step);
+            positions.push([x, 0.0, z]);
+            uvs.push([x, z]);
+        }
+    }
+    let mut indices = Vec::with_capacity((side as usize).saturating_sub(1).pow(2) * 6);
+    for i in 0..side.saturating_sub(1) {
+        for j in 0..side.saturating_sub(1) {
+            let a = i * side + j;
+            let (b, c, d) = (a + 1, a + side + 1, a + side);
+            indices.extend([a, b, c, a, c, d]);
+        }
+    }
+    SceneSpec {
+        materials: vec![material("Grid", [0.5, 0.5, 0.5, 1.0], 0.0, 0.8)],
+        meshes: vec![MeshSpec {
+            name: "Grid".into(),
+            material: 0,
+            positions,
+            normals: vec![[0.0, 1.0, 0.0]; count],
+            uvs: Some(uvs),
+            indices,
+        }],
+        nodes: vec![NodeSpec {
+            name: "Grid".into(),
+            mesh: Some(0),
+            translation: [0.0; 3],
+            rotation: IDENTITY,
+            children: vec![],
+        }],
+        roots: vec![0],
+    }
+    .to_glb()
+}

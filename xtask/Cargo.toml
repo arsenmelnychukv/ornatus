@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+ornatus-core = { path = "../crates/ornatus-core" }
 ornatus-fixtures = { path = "../crates/ornatus-fixtures" }
 
 [lints]

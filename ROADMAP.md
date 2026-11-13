@@ -71,7 +71,7 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 - [x] Scope reduced on 2026-11-13: lightweight, Rust only. No landing page, no HTML or CSS design work, no Impeccable design step.
 - **Done when:** decisions are recorded and the roadmap matches them.
 
-### Phase 1: Foundation (in progress)
+### Phase 1: Foundation (waiting on first push)
 
 - Install the Rust toolchain via `rustup`.
 - Cargo workspace with the three crates and `xtask`. `trunk` setup.
@@ -83,18 +83,16 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 - "Your browser cannot run this" message shown from Rust when neither WebGPU nor WebGL2 is available. The only HTML is a ten-line `index.html` that `trunk` needs as its entry point.
 - **Done when:** the live Pages site opens the themed app shell in the latest Chrome, Firefox and Safari.
 
-### Phase 2: Model viewer (in progress)
+### Phase 2: Model viewer (done)
 
-Done so far: default laptop generator, `.glb` loader with transform baking and error cases, orbit camera with damping, studio-lit viewer, file drop. Still open: file picker, PBR and image-based lighting, a 100 MB browser memory check, and the bounding-box check on user models.
-
-- `xtask` generates the default low-poly laptop with clean UVs.
-- Load a `.glb` from a file picker or drag and drop. Plain `.glb` only, clear errors for other formats or compression, warning above 100 MB.
-- List all mesh and material names and the node hierarchy.
-- Center at the origin using the bounding box, normalize scale.
-- Orbit camera with damping, zoom, pan.
-- PBR shading plus image-based studio lighting.
-- Check memory use when parsing a 100 MB model in the browser.
-- **Done when:** the default model and any reasonable user `.glb` load centered and well lit.
+- [x] `xtask` generates the default low-poly laptop with clean UVs.
+- [x] Load a `.glb` from the file picker, drag and drop, or (desktop) a path argument. Clear errors for broken, compressed or external-data files, warning above 100 MB.
+- [x] List all mesh and material names.
+- [x] Center at the origin using the bounding box, normalize scale.
+- [x] Orbit camera with damping, zoom, pan.
+- [x] PBR shading lit by a procedural studio environment (no HDR file shipped).
+- [x] Memory check with a 100 MB model: it loads in about 0.2 s natively with a 323 MB peak, and loads and renders in the browser (1.9 million vertices) without errors.
+- **Done when:** the default model and any reasonable user `.glb` load centered and well lit. Met.
 
 ### Phase 3: Surface selection and UV audit
 

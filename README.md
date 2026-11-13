@@ -20,6 +20,7 @@ Requires Rust (see `rust-toolchain.toml`) and [`trunk`](https://trunkrs.dev).
 
 ```bash
 cargo run            # native dev window
+cargo run -- model.glb   # open a model on start
 trunk serve          # web build at http://127.0.0.1:8080
-cargo xtask help     # dev tasks
+cargo xtask help     # dev tasks (default model, 100 MB stress test)
 ```

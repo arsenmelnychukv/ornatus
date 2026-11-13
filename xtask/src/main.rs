@@ -12,7 +12,9 @@ fn workspace_root() -> PathBuf {
 fn main() -> ExitCode {
     match std::env::args().nth(1).as_deref() {
         None | Some("help") => {
-            println!("tasks:\n  model    regenerate {MODEL_PATH}");
+            println!(
+                "tasks:\n  model          regenerate {MODEL_PATH}\n  stress [MB]    build a large .glb (default 100 MB) into target/stress.glb and load it\n  stress load    load target/stress.glb in a fresh process, report time and peak memory"
+            );
             ExitCode::SUCCESS
         }
         Some("model") => {
@@ -33,9 +35,75 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Some("stress") => stress(std::env::args().nth(2)),
         Some(other) => {
             eprintln!("unknown task: {other}");
             ExitCode::from(2)
         }
     }
+}
+
+/// Peak resident memory of this process in MB (Linux only).
+fn peak_memory_mb() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find(|l| l.starts_with("VmHWM:"))?;
+    let kb: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kb / 1024)
+}
+
+fn stress(arg: Option<String>) -> ExitCode {
+    let path = workspace_root().join("target/stress.glb");
+    let bytes = if arg.as_deref() == Some("load") {
+        // Load an existing file in a fresh process, so the peak memory
+        // number is not inflated by the generator.
+        match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!(
+                    "could not read {}: {error}. Run `stress` first.",
+                    path.display()
+                );
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        let megabytes: f64 = arg.and_then(|a| a.parse().ok()).unwrap_or(100.0);
+        let side = ((megabytes * 1024.0 * 1024.0 / 56.0).sqrt()) as u32;
+        let bytes = ornatus_fixtures::grid_glb(side);
+        println!(
+            "built grid {side}x{side}: {:.1} MB, {} vertices",
+            bytes.len() as f64 / (1024.0 * 1024.0),
+            u64::from(side) * u64::from(side)
+        );
+        if let Err(error) = std::fs::write(&path, &bytes) {
+            eprintln!("could not write {}: {error}", path.display());
+        }
+        bytes
+    };
+    let before = peak_memory_mb();
+    let started = std::time::Instant::now();
+    let loaded = match ornatus_core::model::load_glb(&bytes) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            eprintln!("load failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    println!(
+        "load: {:.2?}, warnings: {:?}",
+        started.elapsed(),
+        loaded.warnings
+    );
+    drop(bytes);
+    let mut model = loaded.model;
+    let started = std::time::Instant::now();
+    let scale = model.center_and_fit(2.0);
+    println!(
+        "center_and_fit: {:.2?} (scale {scale:?})",
+        started.elapsed()
+    );
+    if let (Some(before), Some(after)) = (before, peak_memory_mb()) {
+        println!("peak memory: {before} MB before load, {after} MB after");
+    }
+    ExitCode::SUCCESS
 }

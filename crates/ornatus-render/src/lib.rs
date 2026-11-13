@@ -227,3 +227,18 @@ impl ModelRenderer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// The shader must parse and validate without a GPU.
+    #[test]
+    fn model_shader_is_valid_wgsl() {
+        let module = naga::front::wgsl::parse_str(include_str!("model.wgsl")).expect("parses");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::empty(),
+        )
+        .validate(&module)
+        .expect("validates");
+    }
+}

@@ -19,6 +19,9 @@ const ZOOM_SPEED: f32 = 0.01;
 /// A dropped file's name and its bytes, or why they could not be read.
 type DroppedBytes = (String, Result<Vec<u8>, String>);
 
+/// Files that finished reading, shared with async readers on the web.
+pub(crate) type Inbox = Arc<Mutex<Vec<DroppedBytes>>>;
+
 /// Top-level application state.
 pub struct OrnatusApp {
     mode: Mode,
@@ -28,7 +31,7 @@ pub struct OrnatusApp {
     controller: CameraController,
     status: Option<String>,
     /// Dropped files that finished reading, waiting to be loaded.
-    inbox: Arc<Mutex<Vec<DroppedBytes>>>,
+    inbox: Inbox,
 }
 
 impl OrnatusApp {
@@ -56,6 +59,18 @@ impl OrnatusApp {
         };
         app.load_bytes("Default laptop", DEFAULT_MODEL);
         app
+    }
+
+    /// Open a `.glb` from disk (desktop dev harness only).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn open_path(&mut self, path: &std::path::Path) {
+        let name = path
+            .file_name()
+            .map_or_else(|| "file".to_owned(), |n| n.to_string_lossy().into_owned());
+        match std::fs::read(path) {
+            Ok(bytes) => self.load_bytes(&name, &bytes),
+            Err(error) => self.status = Some(format!("Could not read {name}: {error}")),
+        }
     }
 
     fn load_bytes(&mut self, name: &str, bytes: &[u8]) {
@@ -130,7 +145,13 @@ impl OrnatusApp {
         }
         ui.separator();
         ui.label(format!("Model: {}", self.model_name));
-        ui.label("Drop a .glb file here to open it.");
+        #[cfg(target_arch = "wasm32")]
+        if ui.button("Open .glb…").clicked() {
+            crate::web::pick_file(Arc::clone(&self.inbox), ui.ctx().clone());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        ui.label("Pass a .glb path as an argument.");
+        ui.label("Or drop a .glb file on the window.");
         if let Some(status) = &self.status {
             ui.colored_label(egui::Color32::from_rgb(240, 190, 90), status);
         }

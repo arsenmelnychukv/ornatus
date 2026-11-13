@@ -5,4 +5,4 @@ mod glb;
 mod laptop;
 
 pub use glb::{MaterialSpec, MeshSpec, NodeSpec, SceneSpec};
-pub use laptop::{laptop_glb, triangle_glb};
+pub use laptop::{grid_glb, laptop_glb, triangle_glb};

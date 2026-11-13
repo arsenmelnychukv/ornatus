@@ -20,4 +20,4 @@ The project must not redistribute third-party 3D models, and must not hard-code 
 
 - Models with bad or no UVs get an error or a warning, not a silent failure.
 - The default model doubles as a test fixture.
-- Parsing a 100 MB model in wasm needs a memory check in Phase 2.
+- Measured 2026-11-13 with a generated 100 MB grid (1.9 million vertices): the loader takes about 0.2 s and peaks at 323 MB natively (`cargo xtask stress`), and the browser build loads and renders it. The 100 MB soft limit stands.
