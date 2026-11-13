@@ -4,7 +4,7 @@ Status: accepted, 2026-11-12
 
 ## Decision
 
-- **Workspace.** A Cargo workspace with three crates:
+- **Workspace.** A Cargo workspace with these crates (plus `xtask` for dev tasks and `ornatus-fixtures`, added in Phase 2, which writes `.glb` bytes for the default laptop and test fixtures):
   - `ornatus-core`: scene data, paint and sticker data, picking, undo, UV audit. No GPU and no window code, so it is fully unit-testable.
   - `ornatus-render`: `wgpu` rendering.
   - `ornatus-app`: `eframe` (`winit` and `egui-wgpu`), the `egui` UI, and the wasm entry point.

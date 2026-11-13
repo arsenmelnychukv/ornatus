@@ -41,7 +41,10 @@ pub async fn start() -> Result<(), String> {
     eframe::WebRunner::new()
         .start(
             canvas,
-            eframe::WebOptions::default(),
+            eframe::WebOptions {
+                depth_buffer: 32,
+                ..Default::default()
+            },
             Box::new(|cc| Ok(Box::new(OrnatusApp::new(cc)))),
         )
         .await

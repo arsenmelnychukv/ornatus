@@ -5,6 +5,9 @@
 
 use std::fmt;
 
+pub mod camera;
+pub mod model;
+
 /// The tool the user is currently working with (see decision 0005).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {

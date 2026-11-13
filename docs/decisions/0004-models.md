@@ -12,7 +12,7 @@ The project must not redistribute third-party 3D models, and must not hard-code 
 - **Size.** Soft limit of 100 MB, with a warning above it.
 - **Loading.** File picker and drag and drop. The path or file is a runtime value, never a constant.
 - **Discovery.** All mesh and material names are read at load time. The user picks the paintable surface from a list, with a highlight in the 3D view. No model-specific code.
-- **Default model.** The app ships our own low-poly laptop (lid, base, hinge, screen) so a first-time visitor sees something to paint immediately. A small Rust tool in the repo (`xtask`) generates it from simple shapes with clean UVs. The same tool produces fixtures for the UV audit tests.
+- **Default model.** The app ships our own low-poly laptop (lid, base, hinge, screen) so a first-time visitor sees something to paint immediately. A small Rust tool in the repo (`cargo xtask model`, backed by the `ornatus-fixtures` crate) generates it from simple shapes with clean UVs. The same tool produces fixtures for the UV audit tests.
 - **Git hygiene.** `*.glb`, `*.gltf` and `assets/models/` are git-ignored, except the generated default model once it exists and its generator is in the repo (add an explicit exception then).
 - **Licensing.** Docs tell users to respect the license of any model they import.
 

@@ -3,8 +3,17 @@ name = "ornatus-core"
 description = "Scene, paint, sticker, picking and undo logic for ornatus. No GPU, window or browser code."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[dependencies]
+glam = "0.34"
+gltf = { version = "1.4", default-features = false, features = ["utils", "names"] }
+thiserror = "2"
+
+[dev-dependencies]
+ornatus-fixtures = { path = "../ornatus-fixtures" }
 
 [lints]
 workspace = true

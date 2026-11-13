@@ -1,11 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["crates/ornatus-core", "crates/ornatus-render", "crates/ornatus-app", "xtask"]
-default-members = ["crates/ornatus-app"]
+members = ["crates/ornatus-fixtures", "crates/ornatus-core", "crates/ornatus-render", "crates/ornatus-app", "xtask"]
+default-members = ["crates/ornatus-fixtures", "crates/ornatus-app"]
 
 [workspace.package]
 version = "0.0.0"
 edition = "2024"
+rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 publish = false
 

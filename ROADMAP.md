@@ -59,7 +59,8 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 - `ornatus-core`: scene data, paint and sticker data, picking, undo, UV audit. No GPU, no window, no browser APIs. Fully unit-testable.
 - `ornatus-render`: `wgpu` rendering. Render passes only, no compute shaders.
 - `ornatus-app`: `eframe`, `egui`, wasm entry point.
-- `xtask`: generates the default laptop model and test fixtures.
+- `ornatus-fixtures`: writes `.glb` bytes for the default laptop and test fixtures. Used by `xtask` and by core's tests.
+- `xtask`: `cargo xtask model` regenerates the default laptop file.
 
 ## Phases
 
@@ -82,7 +83,9 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 - "Your browser cannot run this" message shown from Rust when neither WebGPU nor WebGL2 is available. The only HTML is a ten-line `index.html` that `trunk` needs as its entry point.
 - **Done when:** the live Pages site opens the themed app shell in the latest Chrome, Firefox and Safari.
 
-### Phase 2: Model viewer
+### Phase 2: Model viewer (in progress)
+
+Done so far: default laptop generator, `.glb` loader with transform baking and error cases, orbit camera with damping, studio-lit viewer, file drop. Still open: file picker, PBR and image-based lighting, a 100 MB browser memory check, and the bounding-box check on user models.
 
 - `xtask` generates the default low-poly laptop with clean UVs.
 - Load a `.glb` from a file picker or drag and drop. Plain `.glb` only, clear errors for other formats or compression, warning above 100 MB.

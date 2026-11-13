@@ -6,3 +6,4 @@ assets/models/
 CLAUDE.md
 .claude/
 /dist
+!crates/ornatus-app/assets/default-laptop.glb

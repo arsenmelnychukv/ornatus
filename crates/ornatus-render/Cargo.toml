@@ -3,8 +3,15 @@ name = "ornatus-render"
 description = "wgpu rendering for ornatus. Render passes only, no compute shaders."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[dependencies]
+ornatus-core = { path = "../ornatus-core" }
+bytemuck = { version = "1", features = ["derive"] }
+glam = "0.34"
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
 
 [lints]
 workspace = true
