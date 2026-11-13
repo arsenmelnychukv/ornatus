@@ -9,6 +9,7 @@ mod sticker;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
+use ornatus_core::environment::Environment;
 use ornatus_core::model::{MeshData, Model};
 use wgpu::util::DeviceExt as _;
 
@@ -32,6 +33,8 @@ struct Vertex {
 struct CameraUniform {
     view_proj: [[f32; 4]; 4],
     eye: [f32; 4],
+    env: [f32; 4],
+    env2: [f32; 4],
 }
 
 #[repr(C)]
@@ -70,6 +73,7 @@ pub struct ModelRenderer {
     sticker_images: StickerImages,
     paint_shared: std::sync::Arc<PaintShared>,
     color_format: wgpu::TextureFormat,
+    environment: Environment,
     manual_srgb: bool,
     /// One entry per mesh in the model, `None` for meshes with no triangles.
     meshes: Vec<Option<GpuMesh>>,
@@ -222,6 +226,7 @@ impl ModelRenderer {
             sticker_images: StickerImages::new(device),
             paint_shared: std::sync::Arc::new(PaintShared::new(device)),
             color_format,
+            environment: Environment::STUDIO,
             manual_srgb: !color_format.is_srgb(),
             meshes: Vec::new(),
             selected: None,
@@ -232,15 +237,32 @@ impl ModelRenderer {
     /// Replace the model that gets drawn. Mesh numbers used by
     /// [`set_selected`](Self::set_selected) and [`set_overlay`](Self::set_overlay)
     /// follow the order of `model.meshes`.
-    pub fn set_model(&mut self, device: &wgpu::Device, model: &Model) {
+    ///
+    /// Meshes with no triangles, or too large for one GPU buffer, are not
+    /// drawn. Returns how many meshes were too large.
+    pub fn set_model(&mut self, device: &wgpu::Device, model: &Model) -> usize {
+        let limit = device.limits().max_buffer_size;
+        let mut too_large = 0;
         self.meshes = model
             .meshes
             .iter()
-            .map(|mesh| (!mesh.indices.is_empty()).then(|| self.upload(device, mesh)))
+            .map(|mesh| {
+                if mesh.indices.is_empty() {
+                    return None;
+                }
+                let vertex_bytes = (mesh.positions.len() * std::mem::size_of::<Vertex>()) as u64;
+                let index_bytes = (mesh.indices.len() * 4) as u64;
+                if vertex_bytes > limit || index_bytes > limit {
+                    too_large += 1;
+                    return None;
+                }
+                Some(self.upload(device, mesh))
+            })
             .collect();
         self.selected = None;
         self.overlay = None;
         self.paint = None;
+        too_large
     }
 
     fn upload(&self, device: &wgpu::Device, mesh: &MeshData) -> GpuMesh {
@@ -296,6 +318,8 @@ impl ModelRenderer {
     /// Paint on this mesh from now on, with a fresh transparent layer, or on
     /// nothing with `None`. Any previous paint is dropped.
     pub fn set_paint_surface(&mut self, device: &wgpu::Device, mesh: Option<usize>, size: u32) {
+        // Never ask for a texture this GPU cannot make.
+        let size = size.min(device.limits().max_texture_dimension_2d);
         let shared = std::sync::Arc::clone(&self.paint_shared);
         self.paint = mesh.map(|mesh| (mesh, PaintLayer::new(device, size, shared)));
     }
@@ -382,6 +406,11 @@ impl ModelRenderer {
         self.overlay = None;
     }
 
+    /// Change the lighting. Takes effect with the next [`set_camera`](Self::set_camera).
+    pub fn set_environment(&mut self, environment: Environment) {
+        self.environment = environment;
+    }
+
     /// Upload the camera for the next draw.
     pub fn set_camera(&self, queue: &wgpu::Queue, view_projection: Mat4, eye: Vec3) {
         let uniform = CameraUniform {
@@ -392,6 +421,13 @@ impl ModelRenderer {
                 eye.z,
                 if self.manual_srgb { 1.0 } else { 0.0 },
             ],
+            env: [
+                self.environment.exposure,
+                self.environment.key,
+                self.environment.fill,
+                self.environment.rim,
+            ],
+            env2: [self.environment.ambient, 0.0, 0.0, 0.0],
         };
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
     }

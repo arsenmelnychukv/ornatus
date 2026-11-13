@@ -12,10 +12,12 @@ use ornatus_render::ModelRenderer;
 
 use crate::theme;
 
+mod chrome;
 mod export_tool;
 mod paint_tool;
 mod sticker_tool;
 use crate::viewport::ViewportCallback;
+use chrome::Look;
 use export_tool::ExportTool;
 use paint_tool::PaintTool;
 use sticker_tool::StickerTool;
@@ -53,10 +55,15 @@ pub struct OrnatusApp {
     paint: PaintTool,
     stickers: StickerTool,
     export: ExportTool,
+    look: Look,
+    backend: String,
+    triangle_count: usize,
     pending: Option<Pending>,
     pick_scene: PickScene,
     /// What the cursor is over in the viewport, if it is over it.
     hover: Option<Pick>,
+    /// Whether the pointer was over the viewport last frame.
+    viewport_hovered: bool,
     /// Dropped files that finished reading, waiting to be loaded.
     inbox: Inbox,
 }
@@ -69,6 +76,10 @@ impl OrnatusApp {
             .wgpu_render_state
             .clone()
             .expect("ornatus needs the wgpu renderer");
+        let backend = {
+            let info = render_state.adapter.get_info();
+            format!("{:?} ({})", info.backend, info.name)
+        };
         let renderer = ModelRenderer::new(&render_state.device, render_state.target_format);
         render_state
             .renderer
@@ -89,9 +100,13 @@ impl OrnatusApp {
             paint: PaintTool::default(),
             stickers: StickerTool::default(),
             export: ExportTool::default(),
+            look: Look::default(),
+            backend,
+            triangle_count: 0,
             pending: None,
             pick_scene: PickScene::default(),
             hover: None,
+            viewport_hovered: false,
             inbox: Arc::default(),
         };
         app.load_bytes("Default laptop", DEFAULT_MODEL);
@@ -162,21 +177,24 @@ impl OrnatusApp {
             Ok(loaded) => {
                 let mut model = loaded.model;
                 model.center_and_fit(MODEL_SIZE);
-                self.with_renderer(|renderer, device, _| renderer.set_model(device, &model));
+                let mut too_large = 0;
+                self.with_renderer(|renderer, device, _| {
+                    too_large = renderer.set_model(device, &model);
+                });
                 self.pick_scene = PickScene::new(&model);
                 self.hover = None;
+                self.triangle_count = model.meshes.iter().map(|m| m.indices.len() / 3).sum();
                 self.model = model;
                 self.model_name = name.to_owned();
                 self.controller = CameraController::new(OrbitCamera::default());
                 self.select_surface(suggest_surface(&self.model));
-                self.status = (!loaded.warnings.is_empty()).then(|| {
-                    loaded
-                        .warnings
-                        .iter()
-                        .map(describe_warning)
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                });
+                let mut notes: Vec<String> = loaded.warnings.iter().map(describe_warning).collect();
+                if too_large > 0 {
+                    notes.push(format!(
+                        "{too_large} surface(s) are too large for this GPU and are not shown."
+                    ));
+                }
+                self.status = (!notes.is_empty()).then(|| notes.join(" "));
             }
             Err(error) => self.status = Some(format!("Could not open {name}: {error}")),
         }
@@ -306,12 +324,16 @@ impl OrnatusApp {
         ui.separator();
         self.export_panel(ui);
         ui.separator();
+        self.look_panel(ui);
+        ui.separator();
         self.surface_list(ui);
         self.audit_report(ui);
         ui.separator();
         self.brush_panel(ui);
         ui.separator();
         self.sticker_panel(ui);
+        ui.separator();
+        self.shortcut_help(ui);
     }
 
     fn surface_list(&mut self, ui: &mut egui::Ui) {
@@ -493,8 +515,20 @@ impl OrnatusApp {
         let camera = self.controller.camera;
         let aspect = rect.width() / rect.height().max(1.0);
         self.export_frame(ui.ctx(), rect, aspect);
-        let drawing = self.paint_input(&response, rect, aspect, navigating);
-        self.sticker_input(&response, rect, aspect, navigating);
+        // Everything drawn below goes on top of the background and the model.
+        ui.painter().rect_filled(rect, 0.0, self.background_color());
+        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+            rect,
+            ViewportCallback {
+                view_projection: camera.view_projection(aspect),
+                eye: camera.eye(),
+            },
+        ));
+        // Holding Space means "orbit", so a click then must not draw or place.
+        let navigating_or_space = navigating || space;
+        let drawing = self.paint_input(&response, rect, aspect, navigating_or_space);
+        self.sticker_input(&response, rect, aspect, navigating_or_space);
+        self.viewport_hovered = response.hovered();
         self.hover = None;
         if let (Some(pointer), Some(target)) = (response.hover_pos(), self.selected)
             && !navigating
@@ -522,15 +556,11 @@ impl OrnatusApp {
         if drawing {
             ui.request_repaint();
         }
-        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-            rect,
-            ViewportCallback {
-                view_projection: camera.view_projection(aspect),
-                eye: camera.eye(),
-            },
-        ));
         self.draw_sticker_handles(&ui.painter_at(rect), rect, aspect);
         self.draw_cursor_overlay(&ui.painter_at(rect), rect);
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(self.cursor_icon(navigating));
+        }
     }
 }
 
@@ -569,10 +599,21 @@ fn describe_warning(warning: &LoadWarning) -> String {
 }
 
 impl eframe::App for OrnatusApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // Space orbits over the viewport. Without this, a button that still has
+        // keyboard focus from an earlier click would be pressed again by it.
+        if self.viewport_hovered {
+            ui.ctx().input_mut(|input| {
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Space);
+            });
+        }
         self.handle_dropped_files(ui.ctx());
         self.paint_shortcuts(ui.ctx());
         self.sticker_shortcuts(ui.ctx());
+        self.tool_shortcuts(ui.ctx());
+        egui::Panel::bottom("status")
+            .resizable(false)
+            .show(ui, |ui| self.status_bar(ui, frame));
         egui::Panel::left("tools")
             .resizable(false)
             .exact_size(220.0)

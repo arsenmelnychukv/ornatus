@@ -146,12 +146,17 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 - Not checked: Safari and Firefox downloads, and the 4x size on a real high-resolution display.
 - **Done when:** the exported image matches the viewport with a transparent background. Met.
 
-### Phase 8: Polish and v0.1 release
+### Phase 8: Polish and v0.1 release (in progress)
 
-- Environment presets, shortcuts, tool cursors, status bar.
-- Performance pass: 60 fps at 1080p on integrated graphics.
-- Manual release checklist across the supported browsers.
-- README with the no-contributions policy. GitHub settings per decision 0006.
+- [x] Lighting presets (Studio, Bright, Dramatic) and viewport backgrounds (Dark, Gray, Light). Screenshots stay transparent.
+- [x] Shortcuts for the tools (B, E, V, P) and a controls list in the panel.
+- [x] Cursors that match the tool, and a status bar with the model's triangle count, the graphics backend, the frame cost and the model name.
+- [x] README rewritten for users, with controls, limits and the no-contributions policy.
+- [x] A manual release checklist: [docs/release-checklist.md](docs/release-checklist.md).
+- [ ] **Performance pass.** The status bar shows the CPU cost of each frame, so it can be checked on real hardware. The browser I could test in throttles animation, so no 60 fps number has been measured yet.
+- [ ] **Browser matrix.** Nothing has been run in Safari, Firefox or Edge. Use the checklist.
+- [ ] **GitHub settings** (decision 0006). Issues and Discussions are off. The wiki and projects are still on, `main` is not protected, and there is no limit on who can open pull requests.
+- [ ] Tag v0.1.
 - **Done when:** v0.1 is tagged and live.
 
 ### Phase 9: v0.2
@@ -180,6 +185,9 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 - Nothing leaves the user's machine.
 
 ## Risks and open questions
+
+- **Transparent materials.** Meshes with partly transparent materials are drawn in file order with depth writes on, so overlapping transparent surfaces can look wrong. Fixing it needs sorting or a separate pass.
+- **Large surfaces.** A surface whose vertex or index data exceeds the GPU's buffer limit is skipped with a warning. Surfaces under that limit but with millions of triangles make the UV audit and the BVH build freeze the page for a few seconds.
 
 - **User models vary.** UVs may be packed, mirrored or missing, and the lid may not be a separate mesh. Phase 3 handles detection and warnings.
 - **Model size in the browser.** A 100 MB `.glb` may exceed memory on some machines. Measure in Phase 2 and adjust the limit.

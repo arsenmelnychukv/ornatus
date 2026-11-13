@@ -15,6 +15,8 @@ Research on existing tools (3D painting and decal tools, product customizers, 2D
 - **Shortcuts.** Delete removes, Ctrl+D duplicates, `[` and `]` change order, H flips on purpose. Each sticker has an opacity setting.
 - **Never mirrored by accident.** A sticker is only mirrored when the user flips it.
 - **Screenshot export.** Transparent PNG at 1x, 2x or 4x of the viewport size from the current camera angle. Nothing else in v0.1. The image is rendered offscreen with the same pipeline as the viewport, so it matches what is on screen. It leaves out the selection tint and the problem overlay. Color is divided by alpha after the read back, because blending stores it multiplied.
+- **Tool keys and cursors (Phase 8).** B brush, E eraser, V select and P place switch tools when no text field has focus. The cursor shows what a click would do: a crosshair for drawing and placing, an open hand over a sticker, a closed hand while dragging or orbiting.
+- **Looks (Phase 8).** Lighting presets scale the soft boxes, the room glow and the exposure of the studio. Backgrounds only change the viewport.
 - **Sizes on the surface.** A sticker's size and turn are measured in an undistorted frame on the surface (units of the UV width, with the vertical direction scaled by the surface's UV aspect), so images are not stretched by an uneven UV map.
 
 ## Consequences

@@ -7,6 +7,7 @@ use std::fmt;
 
 pub mod camera;
 pub mod document;
+pub mod environment;
 pub mod locate;
 pub mod model;
 pub mod paint;

@@ -7,6 +7,10 @@ struct Camera {
     view_proj: mat4x4<f32>,
     // xyz: eye position. w: 1 when the target needs manual sRGB encoding.
     eye: vec4<f32>,
+    // x: exposure, y: key light, z: fill light, w: rim light.
+    env: vec4<f32>,
+    // x: ambient glow.
+    env2: vec4<f32>,
 }
 
 struct Material {
@@ -66,10 +70,10 @@ fn soft_box(d: vec3<f32>, axis: vec3<f32>, color: vec3<f32>, roughness: f32) -> 
 // The studio, seen from direction `d` through a blur set by `roughness`.
 fn studio(d: vec3<f32>, roughness: f32) -> vec3<f32> {
     let t = clamp(d.y * 0.5 + 0.5, 0.0, 1.0);
-    var c = mix(vec3<f32>(0.035, 0.035, 0.04), vec3<f32>(0.30, 0.32, 0.37), smoothstep(0.1, 1.0, t));
-    c += soft_box(d, vec3<f32>(0.6, 0.8, 0.5), vec3<f32>(5.0, 4.8, 4.5), roughness);
-    c += soft_box(d, vec3<f32>(-0.9, 0.3, 0.4), vec3<f32>(1.4, 1.7, 2.4), roughness);
-    c += soft_box(d, vec3<f32>(0.1, 0.5, -1.0), vec3<f32>(2.5, 2.5, 3.0), roughness);
+    var c = mix(vec3<f32>(0.035, 0.035, 0.04), vec3<f32>(0.30, 0.32, 0.37), smoothstep(0.1, 1.0, t)) * camera.env2.x;
+    c += soft_box(d, vec3<f32>(0.6, 0.8, 0.5), vec3<f32>(5.0, 4.8, 4.5) * camera.env.y, roughness);
+    c += soft_box(d, vec3<f32>(-0.9, 0.3, 0.4), vec3<f32>(1.4, 1.7, 2.4) * camera.env.z, roughness);
+    c += soft_box(d, vec3<f32>(0.1, 0.5, -1.0), vec3<f32>(2.5, 2.5, 3.0) * camera.env.w, roughness);
     return c;
 }
 
@@ -101,7 +105,7 @@ fn paint_at(uv: vec2<f32>) -> vec4<f32> {
 
 fn tonemap(c: vec3<f32>) -> vec3<f32> {
     // ACES filmic approximation (Narkowicz).
-    let x = c * 0.7;
+    let x = c * 0.7 * camera.env.x;
     return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3<f32>(0.0), vec3<f32>(1.0));
 }
 

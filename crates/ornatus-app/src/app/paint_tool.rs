@@ -205,7 +205,8 @@ impl OrnatusApp {
             return;
         };
         let dabs = builder.take_new_dabs().to_vec();
-        let style = StrokeStyle::from(&self.paint.brush());
+        // The stroke keeps the brush it started with, even if a key changes the tool.
+        let style = StrokeStyle::from(builder.brush());
         self.with_renderer(|renderer, device, queue| {
             if let Some((_, layer)) = renderer.paint() {
                 layer.stamp(device, queue, &style, &dabs);
@@ -238,12 +239,18 @@ impl OrnatusApp {
     }
 
     pub(super) fn undo_paint(&mut self) {
+        if self.paint.current.is_some() || self.sticker_drag_active() {
+            return;
+        }
         if self.paint.document.undo() {
             self.replay_paint();
         }
     }
 
     pub(super) fn redo_paint(&mut self) {
+        if self.paint.current.is_some() || self.sticker_drag_active() {
+            return;
+        }
         if self.paint.document.redo() {
             self.replay_paint();
         }
@@ -264,6 +271,8 @@ impl OrnatusApp {
         if size == self.paint.texture_size {
             return;
         }
+        // Keep the brush the same size on the surface: its size is in texels.
+        self.paint.radius_texels *= size as f32 / self.paint.texture_size as f32;
         self.paint.texture_size = size;
         let strokes = self.paint.document.strokes();
         self.with_renderer(|renderer, device, queue| {
@@ -313,7 +322,8 @@ impl OrnatusApp {
                 ui.color_edit_button_srgb(&mut self.paint.color);
             });
         }
-        ui.add(egui::Slider::new(&mut self.paint.radius_texels, 1.0..=200.0).text("Size"));
+        let largest = 200.0 * self.paint.texture_size as f32 / SIZES[0].0 as f32;
+        ui.add(egui::Slider::new(&mut self.paint.radius_texels, 1.0..=largest).text("Size"));
         ui.add(egui::Slider::new(&mut self.paint.opacity, 0.05..=1.0).text("Opacity"));
         ui.add(egui::Slider::new(&mut self.paint.hardness, 0.0..=1.0).text("Hardness"));
         let mut size = self.paint.texture_size;
@@ -325,7 +335,9 @@ impl OrnatusApp {
                     .map_or("", |(_, l)| *l),
             )
             .show_ui(ui, |ui| {
-                for (value, label) in SIZES {
+                // A size larger than the GPU allows would crash, so it is not offered.
+                let limit = self.render_state.device.limits().max_texture_dimension_2d;
+                for (value, label) in SIZES.into_iter().filter(|(value, _)| *value <= limit) {
                     ui.selectable_value(&mut size, value, label);
                 }
             });

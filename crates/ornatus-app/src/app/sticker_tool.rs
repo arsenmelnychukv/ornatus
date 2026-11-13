@@ -8,6 +8,7 @@ use glam::{Vec2, Vec3};
 use ornatus_core::Mode;
 use ornatus_core::document::Edit;
 use ornatus_core::locate::UvLocator;
+use ornatus_core::pick::Pick;
 use ornatus_core::sticker::{Sticker, surface_uv_aspect};
 use ornatus_render::StickerDraw;
 
@@ -475,6 +476,20 @@ impl OrnatusApp {
         if response.clicked_by(PointerButton::Primary) {
             self.add_sticker(sticker);
         }
+    }
+
+    /// True while a sticker is being moved, scaled or turned.
+    pub(super) fn sticker_drag_active(&self) -> bool {
+        self.stickers.drag.is_some()
+    }
+
+    /// True when the cursor is over a placed sticker.
+    pub(super) fn cursor_over_sticker(&self) -> bool {
+        let Some(Pick::Hit(hit)) = &self.hover else {
+            return false;
+        };
+        hit.uv
+            .is_some_and(|uv| self.topmost_sticker_at(Vec2::from(uv)).is_some())
     }
 
     fn topmost_sticker_at(&self, uv: Vec2) -> Option<Sticker> {

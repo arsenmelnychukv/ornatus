@@ -124,6 +124,11 @@ impl StrokeBuilder {
         &self.dabs[start..]
     }
 
+    /// The brush this stroke started with.
+    pub fn brush(&self) -> &Brush {
+        &self.brush
+    }
+
     /// True when nothing has been drawn.
     pub fn is_empty(&self) -> bool {
         self.dabs.is_empty()
@@ -231,6 +236,14 @@ mod tests {
         builder.add(Some(sample(0.12, 0.12)));
         assert!(!builder.take_new_dabs().is_empty());
         assert!(!builder.is_empty());
+    }
+
+    #[test]
+    fn a_stroke_keeps_the_brush_it_started_with() {
+        let mut builder = StrokeBuilder::new(brush(0.01));
+        builder.add(Some(sample(0.1, 0.1)));
+        assert_eq!(builder.brush().radius_uv, 0.01);
+        assert_eq!(builder.finish().brush.radius_uv, 0.01);
     }
 
     #[test]
