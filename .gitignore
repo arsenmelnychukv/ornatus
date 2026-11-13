@@ -1,0 +1,7 @@
+/target
+*.glb
+*.gltf
+assets/models/
+.DS_Store
+CLAUDE.md
+.claude/
