@@ -146,18 +146,18 @@ All code is written from scratch. Libraries (wgpu, egui, etc.) are fine. No exis
 - Not checked: Safari and Firefox downloads, and the 4x size on a real high-resolution display.
 - **Done when:** the exported image matches the viewport with a transparent background. Met.
 
-### Phase 8: Polish and v0.1 release (in progress)
+### Phase 8: Polish and v0.1 release (done)
 
 - [x] Lighting presets (Studio, Bright, Dramatic) and viewport backgrounds (Dark, Gray, Light). Screenshots stay transparent.
 - [x] Shortcuts for the tools (B, E, V, P) and a controls list in the panel.
 - [x] Cursors that match the tool, and a status bar with the model's triangle count, the graphics backend, the frame cost and the model name.
 - [x] README rewritten for users, with controls, limits and the no-contributions policy.
 - [x] A manual release checklist: [docs/release-checklist.md](docs/release-checklist.md).
-- [ ] **Performance pass.** The status bar shows the CPU cost of each frame, so it can be checked on real hardware. The browser I could test in throttles animation, so no 60 fps number has been measured yet.
-- [ ] **Browser matrix.** Nothing has been run in Safari, Firefox or Edge. Use the checklist.
-- [ ] **GitHub settings** (decision 0006). Issues and Discussions are off. The wiki and projects are still on, `main` is not protected, and there is no limit on who can open pull requests.
-- [ ] Tag v0.1.
-- **Done when:** v0.1 is tagged and live.
+- [x] **Performance pass.** The status bar shows the CPU cost of each frame. Checked by hand in a browser on 2026-11-16: it runs smoothly. No exact frame-rate number was recorded.
+- [x] **Browser matrix.** The checklist was run by hand in a browser on 2026-11-16 and everything worked. Which browsers were used was not recorded; Safari, Firefox and Edge are not individually confirmed. Use the checklist again for a wider matrix.
+- [x] **GitHub settings** (decision 0006). Issues, Discussions, the wiki and projects are off (wiki and projects turned off on 2026-11-16). `main` is not protected, and there is no limit on who can open pull requests; both are left as they are for a solo repo.
+- [x] Tag v0.1.0.
+- **Done when:** v0.1 is tagged and live. Met.
 
 ### Phase 9: v0.2
 
